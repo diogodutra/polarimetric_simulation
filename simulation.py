@@ -26,6 +26,8 @@ default = {
     'verbose':         False, # print every step of every waves travelling
 }
 
+user_parameters = {}
+
 
 def modulus(vector):
     return np.linalg.norm(vector)
@@ -113,9 +115,11 @@ class Simulation():
     
     
     def __init__(self, **kwargs):        
-        kwargs = self.include_default_parameters(**kwargs)
+#         kwargs = self.include_default_parameters(**kwargs)
+        self.__dict__ = copy.copy(default)
         
-        self.verbose = kwargs['verbose']
+        # update parameters with user kwargs
+        self.__dict__.update(kwargs)
 
         
     def __repr__(self):
@@ -127,12 +131,12 @@ class Simulation():
     
     def include_default_parameters(self, **kwargs):
         # copy default parameters
-        self.__dict__ = copy.copy(default)
+        user_parameters = copy.copy(default)
         
-        # update parameters with user kwargs
-        self.__dict__.update(kwargs)
+        # update parameters with user's kwargs
+        user_parameters.update(kwargs)
         
-        return self.__dict__
+        return user_parameters
     
     
     def add_wave(self, **kwargs):
