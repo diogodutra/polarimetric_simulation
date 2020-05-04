@@ -5,6 +5,7 @@ import math
 import itertools
 import datetime
 import warnings
+import matplotlib.pyplot as plt
 
 
 light_speed = 3e8 # meters / s
@@ -286,7 +287,7 @@ class Simulation():
         self.facets.append(Facet(**kwargs))
         
          
-    def add_square_plate(self, **kwargs):
+    def add_square_plate(self, facets_width=5, **kwargs):
         """Adds to the simulation a vertical plane as a series of facets normal=[-1, 0, 0].
 
         Args:
@@ -302,9 +303,9 @@ class Simulation():
         kwargs = self._include_default_parameters(**kwargs)
         
         distance_facets = .1
-        n_facets_each_side = 5
+        facets_each_side = facets_width//2
         
-        list_facets = range(-n_facets_each_side, n_facets_each_side + 1)
+        list_facets = range(-facets_each_side, facets_each_side + 1)
         for x, y in itertools.product([0,], list_facets):
             position = kwargs['position'] + distance_facets * np.array([x, y, 0])
             local_kwargs = copy.copy(kwargs)
@@ -349,6 +350,65 @@ class Simulation():
                 measurement_per_frequency[wave.frequency] += power_complex
                 
         self.measurements[receiver_name] = measurement_per_frequency
+        
+        
+        
+    def print_all_receivers(self):
+        """Prints the power and phase for every receiver across all frequencies."""
+        
+        transmitter_power = 1 # TODO: retrieve transmitted power from add_wave
+        
+        power_phase = np.zeros((len(self.frequencies), 2))
+
+        for receiver_name, measurement_per_frequency in self.measurements.items():
+            for i_freq, (frequency, power_complex) in enumerate(measurement_per_frequency.items()):
+                power = np.abs(power_complex)
+                phase = np.angle(power_complex) % (2*np.pi)
+
+                power_phase[i_freq, 0] = power
+                power_phase[i_freq, 1] = phase
+
+                print(f" {receiver_name} freq:{round(frequency*1e-9,3)}GHz" + \
+                      f" dbW:{round(decibels(power/transmitter_power))}" + \
+                      f" \u03C6:{round(phase * 180 / np.pi)}\u00B0" + \
+                      ''
+                     )
+        
+        
+    def plot_receiver(self, receiver_name):
+        """Plots the power and phase from a receiver across all frequencies.
+
+        Args:
+            reciever_name (string): receiver's label.
+        """
+        
+        power_phase = np.zeros((len(self.frequencies), 2))
+        measurement_per_frequency = self.measurements[receiver_name]
+        
+        for i_freq, (frequency, power_complex) in enumerate(measurement_per_frequency.items()):
+            power = np.abs(power_complex)
+            phase = np.angle(power_complex) % (2*np.pi)
+
+            power_phase[i_freq, 0] = power
+            power_phase[i_freq, 1] = phase
+                
+
+        plt.title(f'Rvv from {receiver_name}')
+
+        plt.xticks([])
+        plt.yticks([])
+
+        ax1 = plt.gcf().add_axes([0.1, 0.5, 0.8, 0.4], xticklabels=[])
+        ax2 = plt.gcf().add_axes([0.1, 0.1, 0.8, 0.4], sharex=ax1)
+
+        frequencies = np.array(self.frequencies)*1e-9
+
+        ax1.plot(frequencies, decibels(power_phase[:, 0]))
+        ax1.set_ylabel('dbW')
+
+        ax2.plot(frequencies, 180/np.pi*power_phase[:, 1])
+        ax2.set_ylabel('\u03C6 \u00B0')
+        ax2.set_xlabel('Frequency GHz')
         
         
     def run_step(self):
