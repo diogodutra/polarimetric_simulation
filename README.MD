@@ -26,7 +26,7 @@
 The mathematical representation of the polarimetric radar entities and the physical phenomena are limited as follows:
 - Electromagnetic wave has no polarization (to be implemented linear and circular polarizations)
 - Surfaces modeling is a series of infinitesimal rigid surfaces (aka: [Facet Method](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2003RS002903))
-- Facets have 1D reflection pattern (to be implemented 2D)
+- Facets have 1D reflection gain / radiation pattern (to be implemented 2D)
 - No receiver equipment (to be implemented monostatic, bi-static, multi-cells array)
 - No transmitter equipment (to be implemented)
 - Transmitters have 1D radiation pattern (to be implemented 2D)
@@ -35,6 +35,7 @@ The mathematical representation of the polarimetric radar entities and the physi
 - No resonance
 - No Doppler effect
 - No quantum effect
+- Isotropic materials only
 - No database of real materials (to be implemented)
 - No Montecarlo simulation (to be implemented)
 - No plots (to be implemented)
