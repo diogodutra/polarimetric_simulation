@@ -93,7 +93,11 @@ class Wave():
 
         
     def __repr__(self):
-        return f"<Wave freq:{self.frequency} power:{self.power} phase:{self.phase} position:{self.position}>"
+        return f"<Wave" + \
+               f" freq:{round(self.frequency)*1e-9}GHz" + \
+               f" power:{round(decibels(self.power))}dbW" + \
+               f" \u03C6:{round(self.phase * 180 / np.pi)}\u00B0" + \
+               f" position:{self.position}m>"
     
     
 class Facet():
@@ -129,6 +133,8 @@ class Simulation():
         
         # update parameters with user kwargs
         self.__dict__.update(kwargs)
+        
+        self.frequencies = set()
 
         
     def __repr__(self):
@@ -157,6 +163,8 @@ class Simulation():
             
         # add new Wave
         self.waves.append(Wave(**kwargs))
+        
+        self.frequencies.add(kwargs['frequency'])
         
         
     def add_facet(self, **kwargs):
@@ -210,6 +218,18 @@ class Simulation():
         phase_measured = np.angle(power_complex) % (2*np.pi)
         
         return power_measured, phase_measured
+    
+    
+    def convert_waves_to_measurements(self):            
+        # convert list of waves to single measurement for every frequency
+        self.frequencies = sorted(list(self.frequencies))
+        for receiver_name, receiver_waves in self.receivers.items():
+            measurement_per_frequency = {frequency: 0+0j for frequency in self.frequencies}
+            for wave in receiver_waves:
+                power_complex = wave.power * cis(wave.phase)
+                measurement_per_frequency[wave.frequency] += power_complex
+                
+        self.measurements[receiver_name] = measurement_per_frequency
         
         
     def run_step(self):
@@ -227,15 +247,15 @@ class Simulation():
                 reflected_angle, reflected_unitary = reflect(displacement, facet.normal)
                 reflected_angle = abs(reflected_angle - np.pi)
                 
-                if self.verbose: print_text = f'Wave @ {wave.position}m P={round(decibels(wave.power))}dbW ' + \
+                if self.verbose: print_text = f'Wave freq:{wave.frequency} @ {wave.position}m P={round(decibels(wave.power))}dbW ' + \
                     f'\u03C6={round(wave.phase*180/np.pi)}\u00B0 going to {facet.position}m' + \
                     f' with incidence={round(reflected_angle*180/np.pi)}\u00B0'
                 
-                is_behind = (np.sin(reflected_angle) < 0)#(reflected_angle > np.pi/2) and (reflected_angle < 3 * np.pi/2)
+                is_behind = (np.sin(reflected_angle) <= 0)#(reflected_angle > np.pi/2) and (reflected_angle < 3 * np.pi/2)
                 
                 if is_behind:
                     
-                    if self.verbose: print_text += ' but gone because it aproached from behind.'
+                    if self.verbose: print_text += ' but gone because it approached from behind.'
                     
                 else:
                     
@@ -252,7 +272,6 @@ class Simulation():
                         # electromagnetic calculations
                         power_origin = wave.power * gain
                         power_incident, phase_incident = propagate(distance, wave.frequency, power_origin, wave.phase)
-#                         print(distance, power_incident, phase_incident)
                         phase_incident = phase_incident % (2*np.pi)
                         power_incident *= facet.area # assuming power constant over all the facet surface. Is it really proportional to the facet area?
 
@@ -263,8 +282,6 @@ class Simulation():
                             if self.verbose: print_text += f' but gone because faded out with P={round(decibels(power_incident))}dbW.'
 
                         else:
-                            
-                            print(f'{np.angle(phase_incident)*180/np.pi}\u00B0')
 
                             new_wave = Wave(
                                     power=power_incident,
@@ -310,6 +327,5 @@ class Simulation():
         if bounce == maximum_bounces - 1:
             warnings.warn("simulation stopped earlier because it reached the maximum bounces.")
             
-        for receiver_name, receiver_waves in self.receivers.items():
-            power_complex = sum([wave.power * cis(wave.phase) for wave in receiver_waves])
-            self.receivers[receiver_name] = power_complex
+            
+        self.convert_waves_to_measurements()
