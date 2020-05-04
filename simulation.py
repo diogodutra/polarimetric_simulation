@@ -20,7 +20,7 @@ default = {
     'power':           1,
     'phase':           0,
     'power_cutoff':    1e-9, # (ie: 1e-9 = -90 decibels)
-    'gain':            lambda incident_angle: max(0, .5*np.cos(5*abs(incident_angle))**.5),
+    'gain':            None,
     'name':            None, # receiver name
     'maximum_bounces': 9, # maximum quantity of bounces before quitting the loop
     'receiver':        False, # bool whether it is a facet or a receiver
@@ -120,6 +120,22 @@ def wavelength(frequency):
     return light_speed / frequency
 
 
+def gain_antenna(*, peak=1, lobes=1, decay=.1):
+    return lambda angle: max(0, np.exp(- decay * angle**2) * peak * np.cos(lobes * abs(angle)))
+
+    
+def gain_omni(peak=1):
+    return gain_antenna(peak=peak, lobes=0, decay=0)
+
+
+def gain_facet_mirror(*, peak=1, lobes=0, decay=10):
+    return gain_antenna(peak=peak, lobes=lobes, decay=decay)
+
+
+def gain_facet_rough(*, peak=.5, lobes=0, decay=.7):
+    return gain_antenna(peak=peak, lobes=lobes, decay=decay)
+
+
 def propagate(distance, frequency, power=1, phase=0):
     """Free-space path loss due to lower power density of an isotropic radiator propagating without medium dispersion.
     
@@ -168,6 +184,8 @@ class Wave():
         
         # update parameters with user kwargs
         self.__dict__.update(kwargs)
+        
+        if self.gain is None: self.gain = gain_omni()
 
         
     def __repr__(self):
@@ -175,7 +193,7 @@ class Wave():
                f" freq:{round(self.frequency)*1e-9}GHz" + \
                f" power:{round(decibels(self.power))}dbW" + \
                f" \u03C6:{round(self.phase * 180 / np.pi)}\u00B0" + \
-               f" position:{self.position}m>"
+               f" position:{self.position}>"
     
     
 class Facet():
@@ -185,6 +203,8 @@ class Facet():
         
         # update parameters with user kwargs
         self.__dict__.update(kwargs)
+        
+        if self.gain is None: self.gain = gain_facet_rough()
         
 #         print(kwargs['normal'])
 #         self.normal = unitary(np.array(kwargs['normal']))
@@ -214,11 +234,13 @@ class Simulation():
         >>> sim.add_wave(frequency=2.45e9, boresight=[1, 0, 0])
         
         >>> sim.run()
+        
+        >>> sim.plot_receiver('Receiver 1')
     """
         
-    waves = [] # list of active waves
-    facets = [] # list of infinitesimal surfaces
-    receivers = {} # dictionary of receivers
+#     waves = [] # list of active waves
+#     facets = [] # list of infinitesimal surfaces
+#     receivers = {} # dictionary of receivers
     
     
     def __init__(self, **kwargs):
@@ -228,7 +250,10 @@ class Simulation():
         self.__dict__.update(kwargs)
         
         self.frequencies = set()
-        self.measurements = {}
+        self.measurements = {}            
+        self.waves = []
+        self.facets = [] # list of infinitesimal surfaces
+        self.receivers = {} # dictionary of receivers
 
         
     def __repr__(self):
@@ -336,6 +361,8 @@ class Simulation():
         name = kwargs['name']
         if name is None: name = str(datetime.datetime.now())
             
+        if kwargs['gain'] is None: kwargs['gain'] = gain_antenna()
+            
         # add one Facet at this new receiver position
         kwargs.update(name=name)
         kwargs.update(receiver=True)
@@ -416,6 +443,15 @@ class Simulation():
         ax2.set_xlabel('Frequency GHz')
         
         
+    def plot_gain(self, gain):        
+        angles = np.arange(-np.pi, np.pi, .001)
+        plt.polar(angles, np.array(list(map(gain, angles))))
+        plt.title('Radiation Pattern')
+        plt.xlabel('Angle [degrees]')
+        plt.ylabel('Gain')
+        plt.savefig('Radiation_Pattern')
+        
+        
     def run_step(self):
         """Runs one bounce for every current wave in the simulation."""
         
@@ -432,8 +468,8 @@ class Simulation():
                 reflected_angle, reflected_unitary = reflect(displacement, facet.normal)
                 reflected_angle = abs(reflected_angle - np.pi)
                 
-                if self.verbose: print_text = f'Wave freq:{wave.frequency} @ {wave.position}m P={round(decibels(wave.power))}dbW ' + \
-                    f'\u03C6={round(wave.phase*180/np.pi)}\u00B0 going to {facet.position}m' + \
+                if self.verbose: print_text = f'Wave freq:{wave.frequency} @ {wave.position} P={round(decibels(wave.power))}dbW ' + \
+                    f'\u03C6={round(wave.phase*180/np.pi)}\u00B0 going to {facet.position}' + \
                     f' with incidence={round(reflected_angle*180/np.pi)}\u00B0'
                 
                 is_behind = (np.cos(reflected_angle) <= 0)
