@@ -287,10 +287,12 @@ class Simulation():
         self.facets.append(Facet(**kwargs))
         
          
-    def add_square_plate(self, facets_width=5, **kwargs):
+    def add_square_plate(self, width=5, height=.1, **kwargs):
         """Adds to the simulation a vertical plane as a series of facets normal=[-1, 0, 0].
 
         Args:
+            width (Optional float): width of the square plate [m] (Default 5).
+            height (Optional float): height of the square plate [m] (Default 0.1).
             area (Optional float): area of each facet [m2] (Default 1e-2).
             gain (Optional function): radiation pattern for the reflection of each facet (Default lambda angle: max(0, .5*np.cos(5*abs(angle))**.5))
             position (Optional numpy.array): components of the position (Default [0, 0, 0].
@@ -303,11 +305,14 @@ class Simulation():
         kwargs = self._include_default_parameters(**kwargs)
         
         distance_facets = .1
-        facets_each_side = facets_width//2
+        facets_each_side_width = int((width / distance_facets) / 2)
+        facets_each_side_height = int((height / distance_facets) / 2)
         
-        list_facets = range(-facets_each_side, facets_each_side + 1)
-        for x, y in itertools.product([0,], list_facets):
-            position = kwargs['position'] + distance_facets * np.array([x, y, 0])
+        facets_width = range(-facets_each_side_width, facets_each_side_width + 1)
+        facets_height = range(-facets_each_side_height, facets_each_side_height + 1)
+        
+        for y, z in itertools.product(facets_width, facets_height):
+            position = kwargs['position'] + distance_facets * np.array([0, y, z])
             local_kwargs = copy.copy(kwargs)
             local_kwargs.update(position=position)            
             self.add_facet(**local_kwargs)
@@ -399,7 +404,7 @@ class Simulation():
         plt.yticks([])
 
         ax1 = plt.gcf().add_axes([0.1, 0.5, 0.8, 0.4], xticklabels=[])
-        ax2 = plt.gcf().add_axes([0.1, 0.1, 0.8, 0.4], sharex=ax1)
+        ax2 = plt.gcf().add_axes([0.1, 0.1, 0.8, 0.4])
 
         frequencies = np.array(self.frequencies)*1e-9
 
