@@ -30,10 +30,26 @@ user_parameters = {}
 
 
 def modulus(vector):
+    """Calculates the modulus of the vector.
+    
+    Args:
+        vector (numpy.array): components of the vector.
+        
+    Returns:
+        (float): norm (magnitude) of the vector.
+    """
     return np.linalg.norm(vector)
 
 
 def unitary(vector):
+    """Calculates the unitary vector.
+    
+    Args:
+        vector (numpy.array): components of the vector.
+        
+    Returns:
+        (numpy.array): components of the unitary vector.
+    """
     vector_abs = modulus(np.array(vector))
     
     if vector_abs==0:
@@ -43,33 +59,94 @@ def unitary(vector):
     
 
 def decibels(power_ratio):
+    """Calculates the decibels for the power ratio (dbW).
+    
+    Args:
+        power_ratio (float): received power over the transmitted power.
+        
+    Returns:
+        (numpy.array): power ratio in decibels [dbW].
+    """
     return 10 * np.log10(power_ratio)
     
 
 def angle(vector_1, vector_2):
+    """Calculates the angle between two vectors.
+    
+    Args:
+        vector_1 (numpy.array): components of the first vector.
+        vector_2 (numpy.array): components of the second vector.
+        
+    Returns:
+        (float): angle between the vectors [radians].
+    """
     return math.acos(np.clip(np.dot(unitary(vector_1), unitary(vector_2)), -1.0, 1.0))
 
 
-def cis(phi=0):
-    return cmath.exp(1j * phi)
+def cis(angle=0):
+    """Calculates the complex exponential function associated to an angle (aka Euler's formula).
+    
+    Args:
+        angle (Optional float): angle [radians].
+        
+    Returns:
+        (complex): complex exponential.
+    """
+    return cmath.exp(1j * angle)
 
 
 def sphere_area(radius):
+    """Calculates the area of a sphere.
+    
+    Args:
+        radius (float): radius of the sphere [m].
+        
+    Returns:
+        (float): area of the sphere [m2].
+    """
     return 4 * np.pi * radius**2
 
 
 def wavelength(frequency):
+    """Calculates the wavelength of an electromagetic wave for a given frequency.
+    
+    Args:
+        frequency (float): frequency of the electromagnetic wave [Hz].
+        
+    Returns:
+        (float): wavelength of the electromagnetic wave [m].
+    """
     return light_speed / frequency
 
 
 def propagate(distance, frequency, power=1, phase=0):
-    """Free-space path loss due to lower power density of an isotropic radiator propagating without medium dispersion."""
+    """Free-space path loss due to lower power density of an isotropic radiator propagating without medium dispersion.
+    
+    Args:
+        distance (float): wave's path distance from origin to destination [m].
+        frequency (float): frequency of the electromagnetic wave [Hz].
+        power (Optional float): wave's power at the origin of the path [W] (default 1).
+        phase (Optional float): wave's phase at the origin of the path [radians] (default 0).
+        
+    Returns:
+        (float): wave's power at the destination [W].
+        (float): wave's phase at the destination [radians].
+    """
     density_loss = 1 / sphere_area(distance)
     phase_change = 2 * np.pi * distance * (frequency / light_speed)
     return power * density_loss, (phase + phase_change) % (2*np.pi)
 
 
 def reflect(incident, normal=[0, 0, 1]):
+    """Calculates the reflected vector given the incident and the surface's normal.
+    
+    Args:
+        incident (numpy.array): components of the unitary incident vector.
+        normal (numpy.array): components of the unitary normal vector of the reflecting surface.
+        
+    Returns:
+        (numpy.array): components of the unitary reflected vector.
+    """
     incident = unitary(incident)
     normal = unitary(normal)
     reflected_angle = angle(incident, normal)
@@ -122,6 +199,21 @@ class Facet():
         
         
 class Simulation():
+    """Contains all waves, facets, receivers and methods to run the polarimetric simulation.
+
+        Args:
+            verbose (Optional bool): prints every wave bounce (default False)
+
+        Usage::
+        
+        >>> sim = simulation.Simulation()
+        
+        >>> sim.add_facet(position=[1, 0, 0], normal=[-1, 0, 0])        
+        >>> sim.add_receiver(boresight=[1, 0, 0], name='Receiver 1')
+        >>> sim.add_wave(frequency=2.45e9, boresight=[1, 0, 0])
+        
+        >>> sim.run()
+    """
         
     waves = [] # list of active waves
     facets = [] # list of infinitesimal surfaces
@@ -135,6 +227,7 @@ class Simulation():
         self.__dict__.update(kwargs)
         
         self.frequencies = set()
+        self.measurements = {}
 
         
     def __repr__(self):
@@ -144,7 +237,7 @@ class Simulation():
         return f"<Simulation waves:{waves} facets:{facets} receivers:{receivers}>"
     
     
-    def include_default_parameters(self, **kwargs):
+    def _include_default_parameters(self, **kwargs):
         # copy default parameters
         user_parameters = copy.copy(default)
         
@@ -159,7 +252,17 @@ class Simulation():
     
     
     def add_wave(self, **kwargs):
-        kwargs = self.include_default_parameters(**kwargs)
+        """Adds one electromagnetic wave to the simulation.
+
+        Args:
+            frequency (float): frequency of the electromagnetic wave [Hz].
+            power (Optional float): wave's transmitted power [dbW] (Default 1).
+            phase (optional float): wave's transmitted phase [radians] (Default 0).
+            position (Optional numpy.array): components of position (Default [0, 0, 0].
+            boresight (Optional numpy.array): components of boresight (Default [1, 0, 0].
+            gain (Optional function): gain of the transmitter (Default lambda angle: max(0, .5*np.cos(5*abs(angle))**.5))
+        """
+        kwargs = self._include_default_parameters(**kwargs)
             
         # add new Wave
         self.waves.append(Wave(**kwargs))
@@ -168,7 +271,15 @@ class Simulation():
         
         
     def add_facet(self, **kwargs):
-        kwargs = self.include_default_parameters(**kwargs)
+        """Adds one facet (element of the discrete surface) to the simulation.
+
+        Args:
+            area (Optional float): area of the facet [m2] (Default 1e-2).
+            gain (Optional function): radiation pattern for the reflection (Default lambda angle: max(0, .5*np.cos(5*abs(angle))**.5))
+            position (Optional numpy.array): components of the position (Default [0, 0, 0]).
+            normal (Optional numpy.array): components of the normal to the surface (Default [0, 1, 0]).
+        """
+        kwargs = self._include_default_parameters(**kwargs)
             
         # add new Facet
         kwargs.update(receiver=False)
@@ -176,10 +287,22 @@ class Simulation():
         
          
     def add_square_plate(self, **kwargs):
-        kwargs = self.include_default_parameters(**kwargs)
+        """Adds to the simulation a vertical plane as a series of facets normal=[-1, 0, 0].
+
+        Args:
+            area (Optional float): area of each facet [m2] (Default 1e-2).
+            gain (Optional function): radiation pattern for the reflection of each facet (Default lambda angle: max(0, .5*np.cos(5*abs(angle))**.5))
+            position (Optional numpy.array): components of the position (Default [0, 0, 0].
+            normal (Optional numpy.array): components of the normal to the surface (Default [0, 1, 0]).
+            
+        TODO:
+            - Add dimensions of the plate as argument.
+            - Add position of each facet aligned to the normal.
+        """
+        kwargs = self._include_default_parameters(**kwargs)
         
-        n_facets_each_side = 9
         distance_facets = .1
+        n_facets_each_side = 5
         
         list_facets = range(-n_facets_each_side, n_facets_each_side + 1)
         for x, y in itertools.product([0,], list_facets):
@@ -190,7 +313,18 @@ class Simulation():
         
         
     def add_receiver(self, **kwargs):
-        kwargs = self.include_default_parameters(**kwargs)
+        """Adds an omini-directional receiver to the simulation in order to measure the environment.
+
+        Args:
+            name (Optional string): receiver's label (Default current date-time).
+            area (Optional float): area of each facet [m2] (Default 1e-2).
+            position (Optional numpy.array): components of the position (Default [0, 0, 0].
+            normal (Optional numpy.array): components of the boresight or normal to the surface (Default [1, 0, 0]).
+            
+        TODO:
+            - Add gain of the receiver's antenna as argument.
+        """
+        kwargs = self._include_default_parameters(**kwargs)
         
         # get name of the receiver
         name = kwargs['name']
@@ -202,25 +336,10 @@ class Simulation():
         self.facets.append(Facet(**kwargs))
         
         # add receiver to the dictionary member with empty list of received waves
-        self.receivers[name] = []        
-        
-        
-    def sum_waves(self, waves):
-        
-        power_complex = 0 + 0j
-        powers = []
-        phases = []
-
-        for wave in waves:
-            power_complex += wave.power * simulation.cis(wave.phase)
-
-        power_measured = np.abs(power_complex)
-        phase_measured = np.angle(power_complex) % (2*np.pi)
-        
-        return power_measured, phase_measured
+        self.receivers[name] = []
     
     
-    def convert_waves_to_measurements(self):            
+    def _convert_waves_to_measurements(self):            
         # convert list of waves to single measurement for every frequency
         self.frequencies = sorted(list(self.frequencies))
         for receiver_name, receiver_waves in self.receivers.items():
@@ -233,6 +352,7 @@ class Simulation():
         
         
     def run_step(self):
+        """Runs one bounce for every current wave in the simulation."""
         
         reflections = []
         
@@ -251,7 +371,7 @@ class Simulation():
                     f'\u03C6={round(wave.phase*180/np.pi)}\u00B0 going to {facet.position}m' + \
                     f' with incidence={round(reflected_angle*180/np.pi)}\u00B0'
                 
-                is_behind = (np.sin(reflected_angle) <= 0)#(reflected_angle > np.pi/2) and (reflected_angle < 3 * np.pi/2)
+                is_behind = (np.cos(reflected_angle) <= 0)
                 
                 if is_behind:
                     
@@ -297,8 +417,9 @@ class Simulation():
 
                                 # TODO: add receiver gain
 
-                                # add new wave to the list of this receiver's received waves
+                                # add new wave to the list of this received waves
                                 self.receivers[facet.name].append(new_wave)
+                                
                             else:
                                 # add new wave to the list of reflections
                                 reflections.append(new_wave)
@@ -310,7 +431,22 @@ class Simulation():
         
         
     def run(self, **kwargs):
-        kwargs = self.include_default_parameters(**kwargs)
+        """Runs all bounces for every current wave in the simulation.
+
+        Args:
+            - maximum_bounces (Optional int): upper limit to interrupt simulation (Default 9).
+        """
+        
+        if len(self.waves) == 0:
+            raise ValueError('No waves found. Add at least one with the "add_wave" method before running the simulation.')
+        
+        if len(self.receivers) == 0:
+            raise ValueError('No receivers found. Add at least one with the "add_receiver" method before running the simulation.')
+        
+        if len(self.facets) - len(self.receivers) == 0:
+            raise ValueError('No facets found. Add at least one with the "add_facet" method before running the simulation.')
+        
+        kwargs = self._include_default_parameters(**kwargs)
         
         maximum_bounces = kwargs['maximum_bounces']
         
@@ -328,4 +464,4 @@ class Simulation():
             warnings.warn("simulation stopped earlier because it reached the maximum bounces.")
             
             
-        self.convert_waves_to_measurements()
+        self._convert_waves_to_measurements()
