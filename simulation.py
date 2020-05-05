@@ -69,6 +69,10 @@ def decibels(power_ratio):
         (numpy.array): power ratio in decibels [dbW].
     """
     return 10 * np.log10(power_ratio)
+
+
+def degrees(radians):
+    return 180/np.pi*radians
     
 
 def angle(vector_1, vector_2):
@@ -168,7 +172,8 @@ def reflect(incident, normal=[0, 0, 1]):
     normal = unitary(normal)
     reflected_angle = angle(incident, normal)
     reflected_unitary = incident - 2 * np.dot(incident, normal) * normal
-    return reflected_angle, reflected_unitary    
+#     return reflected_angle, reflected_unitary
+    return reflected_unitary
     
 
 class Wave():
@@ -237,10 +242,6 @@ class Simulation():
         
         >>> sim.plot_receiver('Receiver 1')
     """
-        
-#     waves = [] # list of active waves
-#     facets = [] # list of infinitesimal surfaces
-#     receivers = {} # dictionary of receivers
     
     
     def __init__(self, **kwargs):
@@ -253,7 +254,8 @@ class Simulation():
         self.measurements = {}            
         self.waves = []
         self.facets = [] # list of infinitesimal surfaces
-        self.receivers = {} # dictionary of receivers
+        self.receivers = {} # dictionary of receivers        
+        self.valid_paths = {} # dictionary of geometry by pairs of facets
 
         
     def __repr__(self):
@@ -419,83 +421,120 @@ class Simulation():
         plt.savefig('Radiation_Pattern')
         
         
-    def run_step(self):
+    def _run_step(self):
         """Runs one bounce for every current wave in the simulation."""
         
         reflections = []
         
         for wave, facet in itertools.product(self.waves, self.facets):
             
-            # geometry calculations
-            displacement = facet.position - wave.position
-            distance = modulus(displacement)
-    
-            if distance > 0: # ignore when facet and wave are at the exact same position
+#             print(wave, facet)
+            
+            geometry = self.valid_paths[(tuple(wave.position), tuple(facet.position))]
+                
+            if geometry['valid']:
+                
+                if self.verbose: print_text = f'Wave freq:{wave.frequency} @ {wave.position} dbW:{round(decibels(wave.power))} ' + \
+                    f'\u03C6:{round(wave.phase*180/np.pi)}\u00B0 going to {facet.position}'
 
-                reflected_angle, reflected_unitary = reflect(displacement, facet.normal)
-                reflected_angle = abs(reflected_angle - np.pi)
-                
-                if self.verbose: print_text = f'Wave freq:{wave.frequency} @ {wave.position} P={round(decibels(wave.power))}dbW ' + \
-                    f'\u03C6={round(wave.phase*180/np.pi)}\u00B0 going to {facet.position}' + \
-                    f' with incidence={round(reflected_angle*180/np.pi)}\u00B0'
-                
-                is_behind = (np.cos(reflected_angle) <= 0)
-                
-                if is_behind:
-                    
-                    if self.verbose: print_text += ' but gone because it approached from behind.'
-                    
+                boresight_angle = angle(wave.boresight, geometry['displacement'])
+
+                gain = wave.gain(boresight_angle) # assuming azimuth==elevation in radiation pattern
+
+                if gain <= 0:
+
+                    if self.verbose: print_text += ' but gone because gain is zero.'
+
                 else:
-                    
-                    boresight_angle = angle(wave.boresight, displacement)
-                    
-                    gain = wave.gain(boresight_angle) # assuming azimuth==elevation in radiation pattern
-                    
-                    if gain <= 0:
-                    
-                        if self.verbose: print_text += ' but gone because gain is zero.'
-                            
+
+                    # electromagnetic calculations
+                    power_origin = wave.power * gain
+                    power_incident, phase_incident = propagate(geometry['distance'], wave.frequency, power_origin, wave.phase)
+                    phase_incident = phase_incident % (2*np.pi)
+                    power_incident *= facet.area # assuming power constant over all the facet surface. Is it really proportional to the facet area?
+
+                    is_faded_out = power_incident < default['power_cutoff']
+
+                    if is_faded_out:
+
+                        if self.verbose: print_text += f' but gone because faded out with P={round(decibels(power_incident))}dbW.'
+
                     else:
 
-                        # electromagnetic calculations
-                        power_origin = wave.power * gain
-                        power_incident, phase_incident = propagate(distance, wave.frequency, power_origin, wave.phase)
-                        phase_incident = phase_incident % (2*np.pi)
-                        power_incident *= facet.area # assuming power constant over all the facet surface. Is it really proportional to the facet area?
+                        new_wave = Wave(
+                                power=power_incident,
+                                phase=phase_incident,
+                                frequency=wave.frequency, # assuming no Doppler effect
+                                position=facet.position,
+                                gain=facet.gain,
+                                boresight=geometry['reflected_unitary_2'],
+                            )
 
-                        is_faded_out = power_incident < default['power_cutoff']
+                        is_receiver = facet.receiver
+                        if is_receiver:
 
-                        if is_faded_out:
+                            # TODO: add receiver gain
 
-                            if self.verbose: print_text += f' but gone because faded out with P={round(decibels(power_incident))}dbW.'
+                            # add new wave to the list of this received waves
+                            self.receivers[facet.name].append(new_wave)
 
                         else:
+                            # add new wave to the list of reflections
+                            reflections.append(new_wave)
 
-                            new_wave = Wave(
-                                    power=power_incident,
-                                    phase=phase_incident,
-                                    frequency=wave.frequency, # assuming no Doppler effect
-                                    position=facet.position,
-                                    gain=facet.gain,
-                                    boresight=reflected_unitary,
-                                )
 
-                            is_receiver = facet.receiver
-                            if is_receiver:
-
-                                # TODO: add receiver gain
-
-                                # add new wave to the list of this received waves
-                                self.receivers[facet.name].append(new_wave)
-                                
-                            else:
-                                # add new wave to the list of reflections
-                                reflections.append(new_wave)
-                                
-                
                 if self.verbose: print(print_text)
                      
         self.waves = reflections
+        
+        
+    def _is_valid_path(self, facet_1, facet_2):
+        
+        geometry = {'valid': False,
+                  'distance': None,
+                  'displacement': None,
+                  'reflected_angle_1': None,
+                  'reflected_angle_2': None,
+                  'reflected_unitary_1': None,
+                  'reflected_unitary_2': None,
+                 }
+        
+        geometry['displacement'] = facet_1.position - facet_2.position
+        geometry['distance'] = modulus(geometry['displacement'])
+
+        is_valid = geometry['distance'] > 0 # ignore when both positions are identical
+            
+        if is_valid:
+                
+            incident_angle_1 = angle(facet_1.normal,  geometry['displacement'])
+            incident_angle_2 = angle(facet_2.normal, -geometry['displacement'])
+
+            is_facing_1 = (incident_angle_1 > np.pi/2)
+            is_facing_2 = (incident_angle_2 > np.pi/2)
+
+            is_valid = is_facing_1 and is_facing_2
+            
+            geometry['reflected_angle_1'] = abs(incident_angle_1 - np.pi)
+            geometry['reflected_angle_2'] = abs(incident_angle_2 - np.pi)
+            
+            if is_valid:
+                reflected_unitary_1 = reflect(geometry['displacement'], facet_1.normal)
+                reflected_unitary_2 = reflect(geometry['displacement'], facet_2.normal)
+        
+                geometry['valid'] = True
+                geometry['reflected_unitary_1'] = reflected_unitary_1
+                geometry['reflected_unitary_2'] = reflected_unitary_2
+                  
+        
+        return geometry
+    
+    
+    def _list_valid_paths(self):
+        
+        for facet_1, facet_2 in itertools.product(self.facets, self.facets):
+            self.valid_paths[(tuple(facet_1.position), tuple(facet_2.position))] = \
+                self._is_valid_path(facet_1, facet_2)
+        
         
         
     def run(self, **kwargs):
@@ -518,15 +557,17 @@ class Simulation():
         
         maximum_bounces = kwargs['maximum_bounces']
         
+        # preprocessing for optimization
+        self._list_valid_paths()
+        
         for bounce in range(maximum_bounces):
             
             if self.verbose: print(f'Bounce {bounce} with {len(self.waves)} waves')
 
-            self.run_step()
+            self._run_step()
 
             stop_loop = (len(self.waves) <= 0)
-            if stop_loop:
-                break
+            if stop_loop: break
 
         if bounce == maximum_bounces - 1:
             warnings.warn("simulation stopped earlier because it reached the maximum bounces.")
