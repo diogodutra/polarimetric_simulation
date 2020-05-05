@@ -374,7 +374,7 @@ class Simulation():
     
     def _convert_waves_to_measurements(self):            
         # convert list of waves to single measurement for every frequency
-        self.frequencies = sorted(list(self.frequencies))
+        self.frequencies = np.array(sorted(list(self.frequencies)))
         for receiver_name, receiver_waves in self.receivers.items():
             measurement_per_frequency = {frequency: 0+0j for frequency in self.frequencies}
             for wave in receiver_waves:
@@ -382,65 +382,32 @@ class Simulation():
                 measurement_per_frequency[wave.frequency] += power_complex
                 
         self.measurements[receiver_name] = measurement_per_frequency
-        
-        
-        
-    def print_all_receivers(self):
-        """Prints the power and phase for every receiver across all frequencies."""
-        
-        transmitter_power = 1 # TODO: retrieve transmitted power from add_wave
-        
-        power_phase = np.zeros((len(self.frequencies), 2))
 
-        for receiver_name, measurement_per_frequency in self.measurements.items():
-            for i_freq, (frequency, power_complex) in enumerate(measurement_per_frequency.items()):
-                power = np.abs(power_complex)
-                phase = np.angle(power_complex) % (2*np.pi)
 
-                power_phase[i_freq, 0] = power
-                power_phase[i_freq, 1] = phase
+    def plot_receiver(self, receiver_name, axes=None):
+        
+        if axes is None: fig, axes = plt.subplots(2, 1, sharex=True)
 
-                print(f" {receiver_name} freq:{round(frequency*1e-9,3)}GHz" + \
-                      f" dbW:{round(decibels(power/transmitter_power))}" + \
-                      f" \u03C6:{round(phase * 180 / np.pi)}\u00B0" + \
-                      ''
-                     )
-        
-        
-    def plot_receiver(self, receiver_name):
-        """Plots the power and phase from a receiver across all frequencies.
-
-        Args:
-            reciever_name (string): receiver's label.
-        """
-        
         power_phase = np.zeros((len(self.frequencies), 2))
         measurement_per_frequency = self.measurements[receiver_name]
-        
+
         for i_freq, (frequency, power_complex) in enumerate(measurement_per_frequency.items()):
             power = np.abs(power_complex)
             phase = np.angle(power_complex) % (2*np.pi)
 
             power_phase[i_freq, 0] = power
             power_phase[i_freq, 1] = phase
-                
 
-        plt.title(f'Rvv from {receiver_name}')
 
-        plt.xticks([])
-        plt.yticks([])
+        axes[0].plot(self.frequencies*1e-9, decibels(power_phase[:,0]))
+        axes[0].set_ylabel('dbW')
 
-        ax1 = plt.gcf().add_axes([0.1, 0.5, 0.8, 0.4], xticklabels=[])
-        ax2 = plt.gcf().add_axes([0.1, 0.1, 0.8, 0.4])
+        axes[1].plot(self.frequencies*1e-9, 180/np.pi*power_phase[:,1])
+        axes[1].set_xlabel('Frequency [GHz]')
+        axes[1].set_ylabel('\u03C6 [\u00B0]')
 
-        frequencies = np.array(self.frequencies)*1e-9
-
-        ax1.plot(frequencies, decibels(power_phase[:, 0]))
-        ax1.set_ylabel('dbW')
-
-        ax2.plot(frequencies, 180/np.pi*power_phase[:, 1])
-        ax2.set_ylabel('\u03C6 \u00B0')
-        ax2.set_xlabel('Frequency GHz')
+        plt.subplots_adjust(hspace=0)
+        _ = plt.suptitle(f'Rvv from {receiver_name}')
         
         
     def plot_gain(self, gain):        
