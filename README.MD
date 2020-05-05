@@ -33,6 +33,7 @@ The mathematical representation of the polarimetric radar entities and the physi
 - No refraction
 - No diffraction
 - No resonance
+- No atmospheric attenuation
 - No Doppler effect
 - No quantum effect
 - Isotropic materials only
