@@ -7,24 +7,28 @@ import datetime
 import warnings
 import matplotlib.pyplot as plt
 
+# TODO:
+# - variable discretization (table as function of displacement, normal and wavelength)
+
 
 light_speed = 3e8 # meters / s
+
     
 default = {
     'frequency':       2.45e9,
     'position':        [0, 0, 0],
     'normal':          [1, 0, 0],
-    'area':            1e-2,
     'boresight':       [1, 0, 0],
     'level_angle':     0,
     'power':           1,
     'phase':           0,
-    'power_cutoff':    1e-9, # (ie: 1e-9 = -90 decibels)
+    'power_cutoff':    1e-9 / 100, # (ie: 1e-9 = -90 decibels)
     'gain':            None,
     'name':            None, # receiver name
     'maximum_bounces': 9, # maximum quantity of bounces before quitting the loop
     'receiver':        False, # bool whether it is a facet or a receiver
     'verbose':         False, # print every step of every waves travelling
+    'facet_length':    1e-1,
 }
 
 user_parameters = {}
@@ -72,7 +76,15 @@ def decibels(power_ratio):
 
 
 def degrees(radians):
-    return 180/np.pi*radians
+    """Converts from radians to degrees.
+    
+    Args:
+        radians (float): angle [radians].
+        
+    Returns:
+        (float): angle [degrees].
+    """
+    return 180 / np.pi * radians
     
 
 def angle(vector_1, vector_2):
@@ -197,7 +209,7 @@ class Wave():
         return f"<Wave" + \
                f" freq:{round(self.frequency)*1e-9}GHz" + \
                f" power:{round(decibels(self.power))}dbW" + \
-               f" \u03C6:{round(self.phase * 180 / np.pi)}\u00B0" + \
+               f" \u03C6:{round(degrees(self.phase))}\u00B0" + \
                f" position:{self.position}>"
     
     
@@ -209,6 +221,7 @@ class Facet():
         # update parameters with user kwargs
         self.__dict__.update(kwargs)
         
+        self.area = kwargs['facet_length'] ** 2
         if self.gain is None: self.gain = gain_facet_rough()
         
 #         print(kwargs['normal'])
@@ -216,8 +229,9 @@ class Facet():
 #         self.position = np.array(kwargs['position'])
 #         self.gain = kwargs['gain'] # gain_reflection
 #         self.name = kwargs['name']
-#         self.area = kwargs['area']
+#         self.facet_length = kwargs['facet_length']
 #         self.receiver = kwargs['receiver']
+
 
         
     def __repr__(self):
@@ -234,6 +248,12 @@ class Simulation():
         
         >>> sim = simulation.Simulation()
         
+        >>> receiver_name = 'Receiver 1'
+        >>> frequencies = np.arange(2.1, 2.9, .01)*1e9
+        >>> distances = np.arange(1, 1.3, .1)
+        >>> height = .4
+        >>> width = 1.6
+        
         >>> sim.add_facet(position=[1, 0, 0], normal=[-1, 0, 0])        
         >>> sim.add_receiver(boresight=[1, 0, 0], name='Receiver 1')
         >>> sim.add_wave(frequency=2.45e9, boresight=[1, 0, 0])
@@ -241,6 +261,30 @@ class Simulation():
         >>> sim.run()
         
         >>> sim.plot_receiver('Receiver 1')
+        
+transmitter_power = 1e0
+facet_length = .1
+
+fig, axs = plt.subplots(2, 1)
+
+for distance in distances:
+    sim = simulation.Simulation(verbose=False)
+    
+    sim.add_plate(width=width, height=height, position=[distance, 0, 0], normal=[-1, 0, 0], facet_length=facet_length)
+
+    sim.add_receiver(name=receiver_name)
+
+    for frequency in frequencies:
+        sim.add_wave(frequency=frequency, power=transmitter_power, phase=0, boresight=[1, 0, 0])
+        
+    sim.run()
+    sim.plot_receiver(receiver_name, axes=axs)
+    
+    
+_ = plt.legend(np.round(distances,1), title='distance')
+
+
+plt.suptitle(f'Svv from plate {round(width,1)}m x {round(height,1)}m')
     """
     
     
@@ -314,7 +358,7 @@ class Simulation():
         self.facets.append(Facet(**kwargs))
         
          
-    def add_square_plate(self, width=5, height=.1, **kwargs):
+    def add_plate(self, width=5, height=.1, **kwargs):
         """Adds to the simulation a vertical plane as a series of facets normal=[-1, 0, 0].
 
         Args:
@@ -331,15 +375,11 @@ class Simulation():
         """
         kwargs = self._include_default_parameters(**kwargs)
         
-        distance_facets = .1
-        facets_each_side_width = int((width / distance_facets) / 2)
-        facets_each_side_height = int((height / distance_facets) / 2)
-        
-        facets_width = range(-facets_each_side_width, facets_each_side_width + 1)
-        facets_height = range(-facets_each_side_height, facets_each_side_height + 1)
+        facets_width = np.arange(-(width-kwargs['facet_length'])/2, (width+kwargs['facet_length'])/2, kwargs['facet_length'])
+        facets_height = np.arange(-(height-kwargs['facet_length'])/2, (height+kwargs['facet_length'])/2, kwargs['facet_length'])
         
         for y, z in itertools.product(facets_width, facets_height):
-            position = kwargs['position'] + distance_facets * np.array([0, y, z])
+            position = kwargs['position'] + np.array([0, y, z])
             local_kwargs = copy.copy(kwargs)
             local_kwargs.update(position=position)            
             self.add_facet(**local_kwargs)
@@ -404,7 +444,7 @@ class Simulation():
         axes[0].plot(self.frequencies*1e-9, decibels(power_phase[:,0]))
         axes[0].set_ylabel('dbW')
 
-        axes[1].plot(self.frequencies*1e-9, 180/np.pi*power_phase[:,1])
+        axes[1].plot(self.frequencies*1e-9, degrees(power_phase[:,1]))
         axes[1].set_xlabel('Frequency [GHz]')
         axes[1].set_ylabel('\u03C6 [\u00B0]')
 
@@ -428,14 +468,14 @@ class Simulation():
         
         for wave, facet in itertools.product(self.waves, self.facets):
             
-#             print(wave, facet)
-            
             geometry = self.valid_paths[(tuple(wave.position), tuple(facet.position))]
+            
+            # TODO: add case when positions are not in the valid_paths
                 
             if geometry['valid']:
                 
                 if self.verbose: print_text = f'Wave freq:{wave.frequency} @ {wave.position} dbW:{round(decibels(wave.power))} ' + \
-                    f'\u03C6:{round(wave.phase*180/np.pi)}\u00B0 going to {facet.position}'
+                    f'\u03C6:{round(degrees(wave.phase))}\u00B0 going to {facet.position}'
 
                 boresight_angle = angle(wave.boresight, geometry['displacement'])
 
@@ -534,15 +574,9 @@ class Simulation():
         for facet_1, facet_2 in itertools.product(self.facets, self.facets):
             self.valid_paths[(tuple(facet_1.position), tuple(facet_2.position))] = \
                 self._is_valid_path(facet_1, facet_2)
-        
-        
-        
-    def run(self, **kwargs):
-        """Runs all bounces for every current wave in the simulation.
-
-        Args:
-            - maximum_bounces (Optional int): upper limit to interrupt simulation (Default 9).
-        """
+            
+            
+    def _preprocess(self):
         
         if len(self.waves) == 0:
             raise ValueError('No waves found. Add at least one with the "add_wave" method before running the simulation.')
@@ -553,11 +587,22 @@ class Simulation():
         if len(self.facets) - len(self.receivers) == 0:
             raise ValueError('No facets found. Add at least one with the "add_facet" method before running the simulation.')
         
+        
+        
+    def run(self, **kwargs):
+        """Runs all bounces for every current wave in the simulation.
+
+        Args:
+            - maximum_bounces (Optional int): upper limit to interrupt simulation (Default 9).
+        """
+        
+        self._preprocess()
+        
         kwargs = self._include_default_parameters(**kwargs)
         
         maximum_bounces = kwargs['maximum_bounces']
         
-        # preprocessing for optimization
+        # preprocessing geometry for optimization
         self._list_valid_paths()
         
         for bounce in range(maximum_bounces):
