@@ -5,10 +5,11 @@ import math
 import itertools
 import datetime
 import warnings
+from collections import defaultdict
 import matplotlib.pyplot as plt
 
-# TODO:
-# - variable discretization (table as function of displacement, normal and wavelength)
+import time
+import sys
 
 
 light_speed = 3e8 # meters / s
@@ -18,7 +19,6 @@ default = {
     'frequency':       2.45e9,
     'position':        [0, 0, 0],
     'normal':          [1, 0, 0],
-    'boresight':       [1, 0, 0],
     'level_angle':     0,
     'power':           1,
     'phase':           0,
@@ -29,10 +29,13 @@ default = {
     'receiver':        False, # bool whether it is a facet or a receiver
     'verbose':         False, # print every step of every waves travelling
     'facet_length':    1e-1,
+    'profile':         False, # print calls and timelapse of some critical methods
 }
 
 user_parameters = {}
 
+
+        
 
 def modulus(vector):
     """Calculates the modulus of the vector.
@@ -46,21 +49,22 @@ def modulus(vector):
     return np.linalg.norm(vector)
 
 
-def unitary(vector):
-    """Calculates the unitary vector.
+def unit(vector, vector_modulus=None):
+    """Calculates the unit vector.
     
     Args:
         vector (numpy.array): components of the vector.
+        modulus (Optional float): magnitude of the vector for optimization (Default None).
         
     Returns:
-        (numpy.array): components of the unitary vector.
+        (numpy.array): components of the unit vector.
     """
-    vector_abs = modulus(np.array(vector))
+    if vector_modulus is None: vector_modulus = modulus(np.array(vector))
     
-    if vector_abs==0:
-        warnings.warn("null vector input to unitary function resulted in null vector.")
+    if vector_modulus<=0:
+        warnings.warn("non-positive vector magnitude results in undetermined unit.")
     
-    return np.array(vector) / vector_abs
+    return np.array(vector) / vector_modulus
     
 
 def decibels(power_ratio):
@@ -85,6 +89,18 @@ def degrees(radians):
         (float): angle [degrees].
     """
     return 180 / np.pi * radians
+
+
+def cos_to_angle(cos):
+    return math.acos(cos)
+
+
+def angle_units(vector_1, vector_2):
+    return math.acos(cossine_units(vector_1, vector_2))
+
+
+def cossine_units(vector_1, vector_2):
+    return np.clip(np.dot(vector_1, vector_2), -1.0, 1.0)
     
 
 def angle(vector_1, vector_2):
@@ -97,7 +113,7 @@ def angle(vector_1, vector_2):
     Returns:
         (float): angle between the vectors [radians].
     """
-    return math.acos(np.clip(np.dot(unitary(vector_1), unitary(vector_2)), -1.0, 1.0))
+    return angle_units(unit(vector_1), unit(vector_2))
 
 
 def cis(angle=0):
@@ -170,39 +186,45 @@ def propagate(distance, frequency, power=1, phase=0):
     return power * density_loss, (phase + phase_change) % (2*np.pi)
 
 
-def reflect(incident, normal=[0, 0, 1]):
+def reflect_units(incident_unit, normal=[0, 0, 1], reflected_angle=None):
     """Calculates the reflected vector given the incident and the surface's normal.
     
     Args:
-        incident (numpy.array): components of the unitary incident vector.
-        normal (numpy.array): components of the unitary normal vector of the reflecting surface.
+        incident_unit (numpy.array): components of the unit incident vector.
+        normal (numpy.array): components of the unit normal vector of the reflecting surface.
+        reflected_angle (Optional float): angle of reflection [radians], for optimization purpose to avoid recalculating the angle (Default None)
         
     Returns:
-        (numpy.array): components of the unitary reflected vector.
+        (numpy.array): components of the unit reflected vector.
     """
-    incident = unitary(incident)
-    normal = unitary(normal)
-    reflected_angle = angle(incident, normal)
-    reflected_unitary = incident - 2 * np.dot(incident, normal) * normal
-#     return reflected_angle, reflected_unitary
-    return reflected_unitary
+    if reflected_angle is None: reflected_angle = angle_unit(incident_unit, normal)
+    reflected_unit = incident_unit - 2 * reflected_angle * normal
+#     return reflected_angle, reflected_unit
+    return reflected_unit, reflected_angle
+
+
+def wave_incident(wave, facet, distance, gain=1):    
+    # electromagnetic calculations
+    power_origin = wave.power * gain
+    power_incident, phase_incident = propagate(distance, wave.frequency, power_origin, wave.phase)
+    phase_incident = phase_incident % (2*np.pi)
+    power_incident *= facet.area # assuming power constant over all the facet surface. Is it really proportional to the facet area?
+    
+    return power_incident, phase_incident
     
 
 class Wave():
     
     def __init__(self, **kwargs):
-#         self.position = np.array(kwargs['position'])
-#         self.frequency = kwargs['frequency']
-#         self.boresight = unitary(np.array(kwargs['boresight']))
-#         self.gain = kwargs['gain']
-#         self.power = kwargs['power']
-#         self.phase = kwargs['phase']
         self.__dict__ = copy.copy(default)
         
         # update parameters with user kwargs
         self.__dict__.update(kwargs)
         
         if self.gain is None: self.gain = gain_omni()
+            
+        self.normal = unit(self.normal) # optimization
+        self.position_tuple = tuple(self.position) # optimization
 
         
     def __repr__(self):
@@ -223,14 +245,9 @@ class Facet():
         
         self.area = kwargs['facet_length'] ** 2
         if self.gain is None: self.gain = gain_facet_rough()
-        
-#         print(kwargs['normal'])
-#         self.normal = unitary(np.array(kwargs['normal']))
-#         self.position = np.array(kwargs['position'])
-#         self.gain = kwargs['gain'] # gain_reflection
-#         self.name = kwargs['name']
-#         self.facet_length = kwargs['facet_length']
-#         self.receiver = kwargs['receiver']
+            
+        self.normal = unit(self.normal) # optimization
+        self.position_tuple = tuple(self.position) # optimization
 
 
         
@@ -244,9 +261,7 @@ class Simulation():
         Args:
             verbose (Optional bool): prints every wave bounce (default False)
 
-        Usage::
-        
-        >>> sim = simulation.Simulation()
+        Usage::        
         
         >>> receiver_name = 'Receiver 1'
         >>> frequencies = np.arange(2.1, 2.9, .01)*1e9
@@ -254,37 +269,21 @@ class Simulation():
         >>> height = .4
         >>> width = 1.6
         
-        >>> sim.add_facet(position=[1, 0, 0], normal=[-1, 0, 0])        
-        >>> sim.add_receiver(boresight=[1, 0, 0], name='Receiver 1')
-        >>> sim.add_wave(frequency=2.45e9, boresight=[1, 0, 0])
-        
-        >>> sim.run()
-        
-        >>> sim.plot_receiver('Receiver 1')
-        
-transmitter_power = 1e0
-facet_length = .1
+        >>> fig, axs = plt.subplots(2, 1)
+        >>> for distance in distances:
+        >>>     sim = simulation.Simulation()
+        >>>     sim.add_plate(width=width, height=height, position=[distance, 0, 0], normal=[-1, 0, 0], facet_length=facet_length)
 
-fig, axs = plt.subplots(2, 1)
+        >>>     sim.add_receiver(name=receiver_name)
 
-for distance in distances:
-    sim = simulation.Simulation(verbose=False)
+        >>>     for frequency in frequencies:
+        >>>         sim.add_wave(frequency=frequency, normal=[1, 0, 0])
+        
+        >>>     sim.run()
+        >>>     sim.plot_receiver(receiver_name, axes=axs)   
     
-    sim.add_plate(width=width, height=height, position=[distance, 0, 0], normal=[-1, 0, 0], facet_length=facet_length)
-
-    sim.add_receiver(name=receiver_name)
-
-    for frequency in frequencies:
-        sim.add_wave(frequency=frequency, power=transmitter_power, phase=0, boresight=[1, 0, 0])
-        
-    sim.run()
-    sim.plot_receiver(receiver_name, axes=axs)
-    
-    
-_ = plt.legend(np.round(distances,1), title='distance')
-
-
-plt.suptitle(f'Svv from plate {round(width,1)}m x {round(height,1)}m')
+        >>> _ = plt.legend(np.round(distances,1), title='distance')
+        >>> plt.suptitle(f'Svv from plate {round(width,1)}m x {round(height,1)}m')
     """
     
     
@@ -295,11 +294,13 @@ plt.suptitle(f'Svv from plate {round(width,1)}m x {round(height,1)}m')
         self.__dict__.update(kwargs)
         
         self.frequencies = set()
-        self.measurements = {}            
+        self.measurements = {} # sum of all waves per receiver
         self.waves = []
-        self.facets = [] # list of infinitesimal surfaces
-        self.receivers = {} # dictionary of receivers        
-        self.valid_paths = {} # dictionary of geometry by pairs of facets
+        self.facets = [] # infinitesimal surfaces
+        self.receivers = {}
+        self.geometries = {} # geometry of each pair of facets
+        self.valid_paths = defaultdict(lambda: []) # valid wave destinations
+        
 
         
     def __repr__(self):
@@ -317,7 +318,7 @@ plt.suptitle(f'Svv from plate {round(width,1)}m x {round(height,1)}m')
         user_parameters.update(kwargs)
         
         # convert list to np.array
-        for key in ['position', 'boresight', 'normal']:
+        for key in ['position', 'normal']:
             user_parameters[key] = np.array(user_parameters[key])
         
         return user_parameters
@@ -330,8 +331,8 @@ plt.suptitle(f'Svv from plate {round(width,1)}m x {round(height,1)}m')
             frequency (float): frequency of the electromagnetic wave [Hz].
             power (Optional float): wave's transmitted power [dbW] (Default 1).
             phase (optional float): wave's transmitted phase [radians] (Default 0).
-            position (Optional numpy.array): components of position (Default [0, 0, 0].
-            boresight (Optional numpy.array): components of boresight (Default [1, 0, 0].
+            position (Optional numpy.array): components of position (Default [0, 0, 0]).
+            normal (Optional numpy.array): components of normal (Default [1, 0, 0]).
             gain (Optional function): gain of the transmitter (Default lambda angle: max(0, .5*np.cos(5*abs(angle))**.5))
         """
         kwargs = self._include_default_parameters(**kwargs)
@@ -392,7 +393,7 @@ plt.suptitle(f'Svv from plate {round(width,1)}m x {round(height,1)}m')
             name (Optional string): receiver's label (Default current date-time).
             area (Optional float): area of each facet [m2] (Default 1e-2).
             position (Optional numpy.array): components of the position (Default [0, 0, 0].
-            normal (Optional numpy.array): components of the boresight or normal to the surface (Default [1, 0, 0]).
+            normal (Optional numpy.array): components of the normal to the surface of the receiver plane (Default [1, 0, 0]).
             
         TODO:
             - Add gain of the receiver's antenna as argument.
@@ -412,6 +413,20 @@ plt.suptitle(f'Svv from plate {round(width,1)}m x {round(height,1)}m')
         
         # add receiver to the dictionary member with empty list of received waves
         self.receivers[name] = []
+        
+        
+    def _append_reflected_wave(self, new_wave, facet):
+        is_receiver = facet.receiver
+        if is_receiver:
+
+            # TODO: add receiver gain
+
+            # add new wave to the list of this received waves
+            self.receivers[facet.name].append(new_wave)
+
+        else:
+            # add new wave to the list of reflections
+            self.reflections.append(new_wave)
     
     
     def _convert_waves_to_measurements(self):            
@@ -464,79 +479,103 @@ plt.suptitle(f'Svv from plate {round(width,1)}m x {round(height,1)}m')
     def _run_step(self):
         """Runs one bounce for every current wave in the simulation."""
         
-        reflections = []
+        if self.profile:
+            times = {
+                'key     ': [0, 0],
+                'geometry': [0, 0],
+                'incident': [0, 0],
+                'new_wave': [0, 0],
+                'append  ': [0, 0],
+            }
         
-        for wave, facet in itertools.product(self.waves, self.facets):
+        self.reflections = []
+        
+        paths_for_this_step = self._create_list_paths_for_this_step()
             
-            geometry = self.valid_paths[(tuple(wave.position), tuple(facet.position))]
+        for wave, facets in paths_for_this_step:
+            for facet in facets:
             
-            # TODO: add case when positions are not in the valid_paths
-                
-            if geometry['valid']:
-                
-                if self.verbose: print_text = f'Wave freq:{wave.frequency} @ {wave.position} dbW:{round(decibels(wave.power))} ' + \
-                    f'\u03C6:{round(degrees(wave.phase))}\u00B0 going to {facet.position}'
+                if self.profile: start_time = time.time()
+                key = (wave.position_tuple, facet.position_tuple)
+                if self.profile: times['key     '][0] += 1                    
+                if self.profile: times['key     '][1] += time.time() - start_time
+                    
+                if self.profile: start_time = time.time()
+                geometry = self.geometries[key]
+                if self.profile: times['geometry'][0] += 1
+                if self.profile: times['geometry'][1] += time.time() - start_time
 
-                boresight_angle = angle(wave.boresight, geometry['displacement'])
+                if geometry['valid']:
 
-                gain = wave.gain(boresight_angle) # assuming azimuth==elevation in radiation pattern
+                    if self.verbose: print_text = f'Wave freq:{wave.frequency} @ {wave.position} dbW:{round(decibels(wave.power))} ' + \
+                        f'\u03C6:{round(degrees(wave.phase))}\u00B0 going to {facet.position}'
 
-                if gain <= 0:
+                    gain = wave.gain(geometry['reflected_angle_1']) # assuming azimuth==elevation in radiation pattern
 
-                    if self.verbose: print_text += ' but gone because gain is zero.'
+                    if gain <= 0:
 
-                else:
-
-                    # electromagnetic calculations
-                    power_origin = wave.power * gain
-                    power_incident, phase_incident = propagate(geometry['distance'], wave.frequency, power_origin, wave.phase)
-                    phase_incident = phase_incident % (2*np.pi)
-                    power_incident *= facet.area # assuming power constant over all the facet surface. Is it really proportional to the facet area?
-
-                    is_faded_out = power_incident < default['power_cutoff']
-
-                    if is_faded_out:
-
-                        if self.verbose: print_text += f' but gone because faded out with P={round(decibels(power_incident))}dbW.'
+                        if self.verbose: print_text += ' but gone because gain is zero.'
 
                     else:
 
-                        new_wave = Wave(
-                                power=power_incident,
-                                phase=phase_incident,
-                                frequency=wave.frequency, # assuming no Doppler effect
-                                position=facet.position,
-                                gain=facet.gain,
-                                boresight=geometry['reflected_unitary_2'],
-                            )
+                        if self.profile: start_time = time.time()
+                        power_incident, phase_incident = wave_incident(wave, facet, geometry['distance'], gain)
+                        if self.profile: times['incident'][0] += 1
+                        if self.profile: times['incident'][1] += time.time() - start_time
 
-                        is_receiver = facet.receiver
-                        if is_receiver:
+                        is_faded_out = power_incident < self.power_cutoff
 
-                            # TODO: add receiver gain
+                        if is_faded_out:
 
-                            # add new wave to the list of this received waves
-                            self.receivers[facet.name].append(new_wave)
+                            if self.verbose: print_text += f' but gone because faded out with P={round(decibels(power_incident))}dbW.'
 
                         else:
-                            # add new wave to the list of reflections
-                            reflections.append(new_wave)
+
+                            if self.profile: start_time = time.time()
+                            new_wave = Wave(
+                                    power=power_incident,
+                                    phase=phase_incident,
+                                    frequency=wave.frequency, # assuming no Doppler effect
+                                    position=facet.position,
+                                    gain=facet.gain,
+                                    normal=geometry['reflected_unit_2'],
+                                )
+                            if self.profile: times['new_wave'][0] += 1
+                            if self.profile: times['new_wave'][1] += time.time() - start_time
+
+                            if self.profile: start_time = time.time()
+                            self._append_reflected_wave(new_wave, facet)
+                            if self.profile: times['append  '][0] += 1
+                            if self.profile: times['append  '][1] += time.time() - start_time
 
 
-                if self.verbose: print(print_text)
+                    if self.verbose: print(print_text)
                      
-        self.waves = reflections
+        self.waves = self.reflections
+        
+        if self.profile:
+            for time_key, (time_calls, time_duration) in times.items():            
+                print(f"{time_key}:\t {time_calls} calls,\t {time_duration} s")
+                
+                
+    def _create_list_paths_for_this_step(self):
+        valid_destinations = []
+        for wave in self.waves:
+            valid_destinations.append([wave, self.valid_paths[wave.position_tuple]])
+            
+        return valid_destinations
         
         
-    def _is_valid_path(self, facet_1, facet_2):
+    def _geometry(self, facet_1, facet_2):
         
         geometry = {'valid': False,
-                  'distance': None,
                   'displacement': None,
+                  'distance': None,
+                  'direction': None,
                   'reflected_angle_1': None,
                   'reflected_angle_2': None,
-                  'reflected_unitary_1': None,
-                  'reflected_unitary_2': None,
+                  'reflected_unit_1': None,
+                  'reflected_unit_2': None,
                  }
         
         geometry['displacement'] = facet_1.position - facet_2.position
@@ -545,39 +584,69 @@ plt.suptitle(f'Svv from plate {round(width,1)}m x {round(height,1)}m')
         is_valid = geometry['distance'] > 0 # ignore when both positions are identical
             
         if is_valid:
-                
-            incident_angle_1 = angle(facet_1.normal,  geometry['displacement'])
-            incident_angle_2 = angle(facet_2.normal, -geometry['displacement'])
-
-            is_facing_1 = (incident_angle_1 > np.pi/2)
-            is_facing_2 = (incident_angle_2 > np.pi/2)
-
+            
+            geometry['direction'] = unit(geometry['displacement'], geometry['distance'])
+            
+            cos_angle_1 = cossine_units(facet_1.normal,  geometry['direction'])
+            cos_angle_2 = cossine_units(facet_2.normal, -geometry['direction'])
+            
+            is_facing_1 = (cos_angle_1 < 0)
+            is_facing_2 = (cos_angle_2 < 0)
             is_valid = is_facing_1 and is_facing_2
             
-            geometry['reflected_angle_1'] = abs(incident_angle_1 - np.pi)
-            geometry['reflected_angle_2'] = abs(incident_angle_2 - np.pi)
-            
-            if is_valid:
-                reflected_unitary_1 = reflect(geometry['displacement'], facet_1.normal)
-                reflected_unitary_2 = reflect(geometry['displacement'], facet_2.normal)
-        
+            if is_valid:  # BUG: omini antennas should not be discarded
+                incident_angle_1 = cos_to_angle(cos_angle_1)
+                incident_angle_2 = cos_to_angle(cos_angle_1)
+                reflected_angle_1 = abs(incident_angle_1 - np.pi)
+                reflected_angle_2 = abs(incident_angle_2 - np.pi)
+                
+                reflected_unit_1, _ = reflect_units(geometry['direction'], facet_1.normal, incident_angle_1)
+                reflected_unit_2, _ = reflect_units(geometry['direction'], facet_2.normal, incident_angle_2)
+                
+                geometry['reflected_angle_1'] = reflected_angle_1
+                geometry['reflected_angle_2'] = reflected_angle_2
+                geometry['reflected_unit_1'] = reflected_unit_1
+                geometry['reflected_unit_2'] = reflected_unit_2
+                
                 geometry['valid'] = True
-                geometry['reflected_unitary_1'] = reflected_unitary_1
-                geometry['reflected_unitary_2'] = reflected_unitary_2
                   
         
         return geometry
     
     
-    def _list_valid_paths(self):
+    def _invert_path(self, geometry):        
+        return {  'valid': geometry['valid'],
+                  'displacement': geometry['displacement'],
+                  'distance': geometry['distance'],
+                  'direction': geometry['direction'],
+                  'reflected_angle_1': geometry['reflected_angle_2'],
+                  'reflected_angle_2': geometry['reflected_angle_1'],
+                  'reflected_unit_1': geometry['reflected_unit_2'],
+                  'reflected_unit_2': geometry['reflected_unit_1'],
+                 }
+    
+    
+    def _calculate_paths(self):        
         
-        for facet_1, facet_2 in itertools.product(self.facets, self.facets):
-            self.valid_paths[(tuple(facet_1.position), tuple(facet_2.position))] = \
-                self._is_valid_path(facet_1, facet_2)
+        for facet_1, facet_2 in itertools.product(self.facets + self.waves, self.facets):
+            
+            # calculate geometry of the path
+            key = (tuple(facet_1.position), tuple(facet_2.position))
+            if key not in self.geometries.keys():
+                geometry = self._geometry(facet_1, facet_2)
+                self.geometries[key] = geometry
+                inverted_key = (tuple(facet_2.position), tuple(facet_1.position))
+                self.geometries[inverted_key] = self._invert_path(geometry)
+                
+                
+            # add this to the list of valid paths
+            if geometry['valid']:
+                self.valid_paths[facet_1.position_tuple].append(facet_2)
             
             
     def _preprocess(self):
         
+        # error dealing ----------------------
         if len(self.waves) == 0:
             raise ValueError('No waves found. Add at least one with the "add_wave" method before running the simulation.')
         
@@ -587,7 +656,9 @@ plt.suptitle(f'Svv from plate {round(width,1)}m x {round(height,1)}m')
         if len(self.facets) - len(self.receivers) == 0:
             raise ValueError('No facets found. Add at least one with the "add_facet" method before running the simulation.')
         
-        
+        # preprocessing geometry -----------
+        self._calculate_paths()
+    
         
     def run(self, **kwargs):
         """Runs all bounces for every current wave in the simulation.
@@ -596,20 +667,23 @@ plt.suptitle(f'Svv from plate {round(width,1)}m x {round(height,1)}m')
             - maximum_bounces (Optional int): upper limit to interrupt simulation (Default 9).
         """
         
+        if self.profile: start_time = time.time()
         self._preprocess()
+        if self.profile: print("Preprocess: %s seconds" % (time.time() - start_time))
         
         kwargs = self._include_default_parameters(**kwargs)
         
         maximum_bounces = kwargs['maximum_bounces']
         
-        # preprocessing geometry for optimization
-        self._list_valid_paths()
-        
         for bounce in range(maximum_bounces):
             
             if self.verbose: print(f'Bounce {bounce} with {len(self.waves)} waves')
-
+            
+            if self.profile: start_time = time.time()
+            
             self._run_step()
+    
+            if self.profile: print("Bounce: %s seconds" % (time.time() - start_time))
 
             stop_loop = (len(self.waves) <= 0)
             if stop_loop: break
@@ -618,4 +692,6 @@ plt.suptitle(f'Svv from plate {round(width,1)}m x {round(height,1)}m')
             warnings.warn("simulation stopped earlier because it reached the maximum bounces.")
             
             
+        if self.profile: start_time = time.time()
         self._convert_waves_to_measurements()
+        if self.profile: print("Measurements: %s seconds" % (time.time() - start_time))
