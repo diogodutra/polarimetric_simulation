@@ -667,7 +667,7 @@ class Simulation():
         for facet_1, facet_2 in itertools.combinations(self.facets + self.waves, r=2):
             
             # calculate geometry of the path
-            key = (tuple(facet_1.position), tuple(facet_2.position))
+            key = (facet_1.position_tuple, facet_2.position_tuple)
             if key not in self.geometries.keys():
                 
                 geometry = self._geometry(facet_1, facet_2)
