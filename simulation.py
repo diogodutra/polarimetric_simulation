@@ -480,13 +480,7 @@ class Simulation():
         """Runs one bounce for every current wave in the simulation."""
         
         if self.profile:
-            times = {
-                'key     ': [0, 0],
-                'geometry': [0, 0],
-                'incident': [0, 0],
-                'new_wave': [0, 0],
-                'append  ': [0, 0],
-            }
+            times = defaultdict(lambda: [0, 0])
         
         self.reflections = []
         
@@ -555,7 +549,7 @@ class Simulation():
         
         if self.profile:
             for time_key, (time_calls, time_duration) in times.items():            
-                print(f"{time_key}:\t {time_calls} calls,\t {time_duration} s")
+                print(f" ┌ {time_key}:\t {time_calls} calls,\t {time_duration} s")
                 
                 
     def _create_list_paths_for_this_step(self):
