@@ -29,7 +29,7 @@ default = {
     'receiver':        False, # bool whether it is a facet or a receiver
     'verbose':         False, # print every step of every waves travelling
     'facet_length':    1e-1,
-    'profile':         False, # print calls and timelapse of some critical methods
+    'profiler':        False, # print calls and timelapse of some critical methods
 }
 
 user_parameters = {}
@@ -232,7 +232,9 @@ class Wave():
                f" freq:{round(self.frequency)*1e-9}GHz" + \
                f" power:{round(decibels(self.power))}dbW" + \
                f" \u03C6:{round(degrees(self.phase))}\u00B0" + \
-               f" position:{self.position}>"
+               f" position:{self.position}" + \
+               f" normal:{self.normal}" + \
+               ">"
     
     
 class Facet():
@@ -243,7 +245,7 @@ class Facet():
         # update parameters with user kwargs
         self.__dict__.update(kwargs)
         
-        self.area = kwargs['facet_length'] ** 2
+        self.area = self.facet_length ** 2
         if self.gain is None: self.gain = gain_facet_rough()
             
         self.normal = unit(self.normal) # optimization
@@ -479,25 +481,25 @@ class Simulation():
     def _run_step(self):
         """Runs one bounce for every current wave in the simulation."""
         
-        if self.profile:
+        if self.profiler:
             times = defaultdict(lambda: [0, 0])
         
         self.reflections = []
         
-        paths_for_this_step = self._create_list_paths_for_this_step()
+        paths_for_this_step = self._list_paths_for_this_step()
             
         for wave, facets in paths_for_this_step:
             for facet in facets:
             
-                if self.profile: start_time = time.time()
+                if self.profiler: start_time = time.time()
                 key = (wave.position_tuple, facet.position_tuple)
-                if self.profile: times['key     '][0] += 1                    
-                if self.profile: times['key     '][1] += time.time() - start_time
+                if self.profiler: times['key     '][0] += 1                    
+                if self.profiler: times['key     '][1] += time.time() - start_time
                     
-                if self.profile: start_time = time.time()
+                if self.profiler: start_time = time.time()
                 geometry = self.geometries[key]
-                if self.profile: times['geometry'][0] += 1
-                if self.profile: times['geometry'][1] += time.time() - start_time
+                if self.profiler: times['geometry'][0] += 1
+                if self.profiler: times['geometry'][1] += time.time() - start_time
 
                 if geometry['valid']:
 
@@ -512,10 +514,10 @@ class Simulation():
 
                     else:
 
-                        if self.profile: start_time = time.time()
+                        if self.profiler: start_time = time.time()
                         power_incident, phase_incident = wave_incident(wave, facet, geometry['distance'], gain)
-                        if self.profile: times['incident'][0] += 1
-                        if self.profile: times['incident'][1] += time.time() - start_time
+                        if self.profiler: times['incident'][0] += 1
+                        if self.profiler: times['incident'][1] += time.time() - start_time
 
                         is_faded_out = power_incident < self.power_cutoff
 
@@ -525,7 +527,7 @@ class Simulation():
 
                         else:
 
-                            if self.profile: start_time = time.time()
+                            if self.profiler: start_time = time.time()
                             new_wave = Wave(
                                     power=power_incident,
                                     phase=phase_incident,
@@ -534,30 +536,33 @@ class Simulation():
                                     gain=facet.gain,
                                     normal=geometry['reflected_unit_2'],
                                 )
-                            if self.profile: times['new_wave'][0] += 1
-                            if self.profile: times['new_wave'][1] += time.time() - start_time
+                            if self.profiler: times['new_wave'][0] += 1
+                            if self.profiler: times['new_wave'][1] += time.time() - start_time
 
-                            if self.profile: start_time = time.time()
+                            if self.profiler: start_time = time.time()
                             self._append_reflected_wave(new_wave, facet)
-                            if self.profile: times['append  '][0] += 1
-                            if self.profile: times['append  '][1] += time.time() - start_time
+                            if self.profiler: times['append  '][0] += 1
+                            if self.profiler: times['append  '][1] += time.time() - start_time
 
 
                     if self.verbose: print(print_text)
                      
         self.waves = self.reflections
         
-        if self.profile:
+        if self.profiler:
             for time_key, (time_calls, time_duration) in times.items():            
                 print(f" ┌ {time_key}:\t {time_calls} calls,\t {time_duration} s")
                 
                 
-    def _create_list_paths_for_this_step(self):
-        valid_destinations = []
+    def _list_paths_for_this_step(self):
+        valid_paths = []
         for wave in self.waves:
-            valid_destinations.append([wave, self.valid_paths[wave.position_tuple]])
+            valid_destinations = self.valid_paths[wave.position_tuple]
+            if len(valid_destinations) > 0:
+                valid_paths.append([wave, valid_destinations])
             
-        return valid_destinations
+            
+        return valid_paths
         
         
     def _geometry(self, facet_1, facet_2):
@@ -627,15 +632,17 @@ class Simulation():
             # calculate geometry of the path
             key = (tuple(facet_1.position), tuple(facet_2.position))
             if key not in self.geometries.keys():
+                
                 geometry = self._geometry(facet_1, facet_2)
                 self.geometries[key] = geometry
                 inverted_key = (tuple(facet_2.position), tuple(facet_1.position))
                 self.geometries[inverted_key] = self._invert_path(geometry)
                 
                 
-            # add this to the list of valid paths
-            if geometry['valid']:
-                self.valid_paths[facet_1.position_tuple].append(facet_2)
+                # add this to the list of valid paths
+                if geometry['valid']:
+                    self.valid_paths[facet_1.position_tuple].append(facet_2)
+                    self.valid_paths[facet_2.position_tuple].append(facet_1)
             
             
     def _preprocess(self):
@@ -661,9 +668,9 @@ class Simulation():
             - maximum_bounces (Optional int): upper limit to interrupt simulation (Default 9).
         """
         
-        if self.profile: start_time = time.time()
+        if self.profiler: start_time = time.time()
         self._preprocess()
-        if self.profile: print("Preprocess: %s seconds" % (time.time() - start_time))
+        if self.profiler: print("Preprocess: %s seconds" % (time.time() - start_time))
         
         kwargs = self._include_default_parameters(**kwargs)
         
@@ -673,11 +680,11 @@ class Simulation():
             
             if self.verbose: print(f'Bounce {bounce} with {len(self.waves)} waves')
             
-            if self.profile: start_time = time.time()
+            if self.profiler: start_time = time.time()
             
             self._run_step()
     
-            if self.profile: print("Bounce: %s seconds" % (time.time() - start_time))
+            if self.profiler: print("Bounce: %s seconds" % (time.time() - start_time))
 
             stop_loop = (len(self.waves) <= 0)
             if stop_loop: break
@@ -686,6 +693,6 @@ class Simulation():
             warnings.warn("simulation stopped earlier because it reached the maximum bounces.")
             
             
-        if self.profile: start_time = time.time()
+        if self.profiler: start_time = time.time()
         self._convert_waves_to_measurements()
-        if self.profile: print("Measurements: %s seconds" % (time.time() - start_time))
+        if self.profiler: print("Measurements: %s seconds" % (time.time() - start_time))
