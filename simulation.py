@@ -245,19 +245,25 @@ class Wave():
     
     
 class Facet():
-    
-    def __init__(self, **kwargs):
-        self.__dict__ = copy.copy(default)
-        
-        # update parameters with user kwargs
-        self.__dict__.update(kwargs)
-        
-        self.area = self.facet_length ** 2
-        if self.gain is None: self.gain = gain_facet_rough()
-            
-        self.normal = unit(self.normal) # optimization
-        self.position_tuple = tuple(self.position) # optimization
 
+    __slots__ = ['area',
+                 'position',
+                 'position_tuple',
+                 'normal',
+                 'gain',
+                 'receiver',
+                 'name',
+                ] # optimization
+        
+        
+    def __init__(self, area, position, normal, gain, receiver, name):
+        self.area = area
+        self.position = position
+        self.position_tuple=tuple(position)
+        self.normal = normal # assuming normal is unit
+        self.gain = gain
+        self.receiver = receiver
+        self.name = name
 
         
     def __repr__(self):
@@ -308,8 +314,7 @@ class Simulation():
         self.facets = [] # infinitesimal surfaces
         self.receivers = {}
         self.geometries = {} # geometry of each pair of facets
-        self.valid_paths = defaultdict(lambda: []) # valid wave destinations
-        
+        self.valid_paths = defaultdict(lambda: []) # valid wave destinations        
 
         
     def __repr__(self):
@@ -370,10 +375,19 @@ class Simulation():
             normal (Optional numpy.array): components of the normal to the surface (Default [0, 1, 0]).
         """
         kwargs = self._include_default_parameters(**kwargs)
+
+        if kwargs['gain'] is None: kwargs['gain'] = gain_facet_rough()
             
         # add new Facet
         kwargs.update(receiver=False)
-        self.facets.append(Facet(**kwargs))
+        self.facets.append(Facet(
+            area=kwargs['facet_length']**2,
+            position=kwargs['position'],
+            normal=kwargs['normal'],
+            gain=kwargs['gain'],
+            receiver=False,
+            name=None,
+        ))
         
          
     def add_plate(self, width=5, height=.1, **kwargs):
@@ -426,7 +440,15 @@ class Simulation():
         # add one Facet at this new receiver position
         kwargs.update(name=name)
         kwargs.update(receiver=True)
-        self.facets.append(Facet(**kwargs))
+        
+        self.facets.append(Facet(
+            area=kwargs['facet_length']**2,
+            position=kwargs['position'],
+            normal=kwargs['normal'],
+            gain=kwargs['gain'],
+            receiver=True,
+            name=name,
+        ))
         
         # add receiver to the dictionary member with empty list of received waves
         self.receivers[name] = []
