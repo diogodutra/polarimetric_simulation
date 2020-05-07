@@ -662,9 +662,9 @@ class Simulation():
                  }
     
     
-    def _calculate_paths(self):        
-        
-        for facet_1, facet_2 in itertools.product(self.facets + self.waves, self.facets):
+    def _calculate_paths(self):
+            
+        for facet_1, facet_2 in itertools.combinations(self.facets + self.waves, r=2):
             
             # calculate geometry of the path
             key = (tuple(facet_1.position), tuple(facet_2.position))
