@@ -13,6 +13,7 @@ import sys
 
 
 light_speed = 3e8 # meters / s
+_2pi = 2 * np.pi
 
     
 default = {
@@ -137,7 +138,7 @@ def sphere_area(radius):
     Returns:
         (float): area of the sphere [m2].
     """
-    return 4 * np.pi * radius**2
+    return 2 * _2pi * radius**2
 
 
 def wavelength(frequency):
@@ -153,7 +154,7 @@ def wavelength(frequency):
 
 
 def gain_antenna(*, peak=1, lobes=1, decay=.1):
-    return lambda angle: max(0, np.exp(- decay * angle**2) * peak * np.cos(lobes * abs(angle)))
+    return lambda angle: max(0, math.exp(- decay * angle**2) * peak * math.cos(lobes * abs(angle)))
 
     
 def gain_omni(peak=1):
@@ -168,22 +169,33 @@ def gain_facet_rough(*, peak=.5, lobes=0, decay=.7):
     return gain_antenna(peak=peak, lobes=lobes, decay=decay)
 
 
-def propagate(distance, frequency, power=1, phase=0):
+def phase_shift(distance, wavelength, phase=0):
+    """Calculates change in phase due to the wave travel.
+    
+    Args:
+        distance (float): wave's path distance from origin to destination [m].
+        wavelength (float): wavelength of the electromagnetic wave [m].
+        phase (Optional float): wave's phase at the origin of the path [radians] (default 0).
+        
+    Returns:
+        (float): wave's phase at the destination [radians].
+    """
+    phase_change = _2pi * distance * wavelength
+    return (phase + phase_change) % _2pi
+
+
+def power_loss(distance, power=1):
     """Free-space path loss due to lower power density of an isotropic radiator propagating without medium dispersion.
     
     Args:
         distance (float): wave's path distance from origin to destination [m].
-        frequency (float): frequency of the electromagnetic wave [Hz].
         power (Optional float): wave's power at the origin of the path [W] (default 1).
-        phase (Optional float): wave's phase at the origin of the path [radians] (default 0).
         
     Returns:
         (float): wave's power at the destination [W].
-        (float): wave's phase at the destination [radians].
     """
     density_loss = 1 / sphere_area(distance)
-    phase_change = 2 * np.pi * distance * (frequency / light_speed)
-    return power * density_loss, (phase + phase_change) % (2*np.pi)
+    return power * density_loss
 
 
 def reflect_units(incident_unit, normal=[0, 0, 1], reflected_angle=None):
@@ -199,15 +211,14 @@ def reflect_units(incident_unit, normal=[0, 0, 1], reflected_angle=None):
     """
     if reflected_angle is None: reflected_angle = angle_unit(incident_unit, normal)
     reflected_unit = incident_unit - 2 * reflected_angle * normal
-#     return reflected_angle, reflected_unit
     return reflected_unit, reflected_angle
 
 
 def wave_incident(wave, facet, distance, gain=1):    
     # electromagnetic calculations
     power_origin = wave.power * gain
-    power_incident, phase_incident = propagate(distance, wave.frequency, power_origin, wave.phase)
-    phase_incident = phase_incident % (2*np.pi)
+    phase_incident = phase_shift(distance, wave.wavelength, wave.phase)
+    power_incident = power_loss(distance, power_origin)
     power_incident *= facet.area # assuming power constant over all the facet surface. Is it really proportional to the facet area?
     
     return power_incident, phase_incident
@@ -222,10 +233,12 @@ class Wave():
                  'power',
                  'phase',
                  'gain',
+                 'wavelength',
                 ] # optimization
         
     def __init__(self, frequency, position, normal, power, phase, gain):
         self.frequency = frequency
+        self.wavelength = self.frequency / light_speed
         self.position = position
         self.position_tuple=tuple(position)
         self.normal = normal # assuming normal is unit
@@ -370,7 +383,7 @@ class Simulation():
 
         Args:
             area (Optional float): area of the facet [m2] (Default 1e-2).
-            gain (Optional function): radiation pattern for the reflection (Default lambda angle: max(0, .5*np.cos(5*abs(angle))**.5))
+            gain (Optional lambda function): radiation pattern for the reflection (Default  gain_facet_rough)
             position (Optional numpy.array): components of the position (Default [0, 0, 0]).
             normal (Optional numpy.array): components of the normal to the surface (Default [0, 1, 0]).
         """
@@ -397,7 +410,7 @@ class Simulation():
             width (Optional float): width of the square plate [m] (Default 5).
             height (Optional float): height of the square plate [m] (Default 0.1).
             area (Optional float): area of each facet [m2] (Default 1e-2).
-            gain (Optional function): radiation pattern for the reflection of each facet (Default lambda angle: max(0, .5*np.cos(5*abs(angle))**.5))
+            gain (Optional function): radiation pattern for the reflection of each facet (Default lambda angle: max(0, .5*math.cos(5*abs(angle))**.5))
             position (Optional numpy.array): components of the position (Default [0, 0, 0].
             normal (Optional numpy.array): components of the normal to the surface (Default [0, 1, 0]).
             
@@ -489,7 +502,7 @@ class Simulation():
 
         for i_freq, (frequency, power_complex) in enumerate(measurement_per_frequency.items()):
             power = np.abs(power_complex)
-            phase = np.angle(power_complex) % (2*np.pi)
+            phase = np.angle(power_complex) % _2pi
 
             power_phase[i_freq, 0] = power
             power_phase[i_freq, 1] = phase
