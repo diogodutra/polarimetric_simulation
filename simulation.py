@@ -672,7 +672,7 @@ class Simulation():
                 
                 geometry = self._geometry(facet_1, facet_2)
                 self.geometries[key] = geometry
-                inverted_key = (tuple(facet_2.position), tuple(facet_1.position))
+                inverted_key = (facet_2.position_tuple, facet_1.position_tuple)
                 self.geometries[inverted_key] = self._invert_path(geometry)
                 
                 
