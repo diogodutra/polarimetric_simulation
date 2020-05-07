@@ -214,17 +214,24 @@ def wave_incident(wave, facet, distance, gain=1):
     
 
 class Wave():
-    
-    def __init__(self, **kwargs):
-        self.__dict__ = copy.copy(default)
+
+    __slots__ = ['frequency',
+                 'position',
+                 'position_tuple',
+                 'normal',
+                 'power',
+                 'phase',
+                 'gain',
+                ] # optimization
         
-        # update parameters with user kwargs
-        self.__dict__.update(kwargs)
-        
-        if self.gain is None: self.gain = gain_omni()
-            
-        self.normal = unit(self.normal) # optimization
-        self.position_tuple = tuple(self.position) # optimization
+    def __init__(self, frequency, position, normal, power, phase, gain):
+        self.frequency = frequency
+        self.position = position
+        self.position_tuple=tuple(position)
+        self.normal = normal # assuming normal is unit
+        self.power = power
+        self.phase = phase
+        self.gain = gain
 
         
     def __repr__(self):
@@ -338,9 +345,17 @@ class Simulation():
             gain (Optional function): gain of the transmitter (Default lambda angle: max(0, .5*np.cos(5*abs(angle))**.5))
         """
         kwargs = self._include_default_parameters(**kwargs)
-            
-        # add new Wave
-        self.waves.append(Wave(**kwargs))
+
+        if kwargs['gain'] is None: kwargs['gain'] = gain_omni()
+
+        self.waves.append(Wave(
+                frequency=kwargs['frequency'], # assuming no Doppler effect
+                position=kwargs['position'],
+                normal=kwargs['normal'],
+                power=kwargs['power'],
+                phase=kwargs['phase'],
+                gain=kwargs['gain'],
+            ))
         
         self.frequencies.add(kwargs['frequency'])
         
@@ -529,12 +544,12 @@ class Simulation():
 
                             if self.profiler: start_time = time.time()
                             new_wave = Wave(
-                                    power=power_incident,
-                                    phase=phase_incident,
                                     frequency=wave.frequency, # assuming no Doppler effect
                                     position=facet.position,
-                                    gain=facet.gain,
                                     normal=geometry['reflected_unit_2'],
+                                    power=power_incident,
+                                    phase=phase_incident,
+                                    gain=facet.gain,
                                 )
                             if self.profiler: times['new_wave'][0] += 1
                             if self.profiler: times['new_wave'][1] += time.time() - start_time
