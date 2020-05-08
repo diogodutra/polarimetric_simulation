@@ -543,11 +543,6 @@ class Simulation():
             
         for wave, facets in paths_for_this_step:
             for (facet, key) in facets:
-            
-#                 if self.profiler: start_time = time.time()
-#                 key = (wave.position_tuple, facet.position_tuple)
-#                 if self.profiler: times['key     '][0] += 1                    
-#                 if self.profiler: times['key     '][1] += time.time() - start_time
                     
                 if self.profiler: start_time = time.time()
                 geometry = self.geometries[key]
