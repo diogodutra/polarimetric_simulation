@@ -23,7 +23,6 @@ default = {
     'level_angle':         0,
     'power':               1,
     'phase':               0,
-    'power_cutoff':        1e-9 / 100, # (ie: 1e-9 = -90 decibels)
     'gain':                None,
     'name':                None, # receiver name
     'maximum_bounces':     9, # maximum quantity of bounces before quitting the loop
@@ -570,37 +569,24 @@ class Simulation():
 
                 else:
 
-#                     if self.profiler: start_time = time.time()
-                        
-#                     if self.profiler: times['incident'][0] += 1
-#                     if self.profiler: times['incident'][1] += time.time() - start_time
+                    if self.profiler: start_time = time.time()
+                    new_wave = Wave(
+                            frequency=wave.frequency, # assuming no Doppler effect
+                            position=facet.position,
+                            normal=geometry['reflected_unit_2'],
+                            power=wave.power,
+                            phase=wave.phase,
+                            gain=facet.gain,
+                            cumulative_distance= wave.cumulative_distance + geometry['distance'],
+                            cumulative_loss= wave.cumulative_loss * gain * facet.area
+                        )
+                    if self.profiler: times['new_wave'][0] += 1
+                    if self.profiler: times['new_wave'][1] += time.time() - start_time
 
-                    is_faded_out = False#power_incident < self.power_cutoff
-
-                    if is_faded_out:
-
-                        if self.verbose: print_text += f' but gone because faded out with P={round(decibels(power_incident))}dbW.'
-
-                    else:
-
-                        if self.profiler: start_time = time.time()
-                        new_wave = Wave(
-                                frequency=wave.frequency, # assuming no Doppler effect
-                                position=facet.position,
-                                normal=geometry['reflected_unit_2'],
-                                power=wave.power,
-                                phase=wave.phase,
-                                gain=facet.gain,
-                                cumulative_distance=wave.cumulative_distance+geometry['distance'],
-                                cumulative_loss=wave.cumulative_loss*gain*facet.area
-                            )
-                        if self.profiler: times['new_wave'][0] += 1
-                        if self.profiler: times['new_wave'][1] += time.time() - start_time
-
-                        if self.profiler: start_time = time.time()
-                        self._append_reflected_wave(new_wave, facet)
-                        if self.profiler: times['append  '][0] += 1
-                        if self.profiler: times['append  '][1] += time.time() - start_time
+                    if self.profiler: start_time = time.time()
+                    self._append_reflected_wave(new_wave, facet)
+                    if self.profiler: times['append  '][0] += 1
+                    if self.profiler: times['append  '][1] += time.time() - start_time
 
 
                 if self.verbose: print(print_text)
