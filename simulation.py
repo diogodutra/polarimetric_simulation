@@ -17,20 +17,22 @@ _2pi = 2 * np.pi
 
     
 default = {
-    'frequency':       2.45e9,
-    'position':        [0, 0, 0],
-    'normal':          [1, 0, 0],
-    'level_angle':     0,
-    'power':           1,
-    'phase':           0,
-    'power_cutoff':    1e-9 / 100, # (ie: 1e-9 = -90 decibels)
-    'gain':            None,
-    'name':            None, # receiver name
-    'maximum_bounces': 9, # maximum quantity of bounces before quitting the loop
-    'receiver':        False, # bool whether it is a facet or a receiver
-    'verbose':         False, # print every step of every waves travelling
-    'facet_length':    1e-1,
-    'profiler':        False, # print calls and timelapse of some critical methods
+    'frequency':           2.45e9,
+    'position':            [0, 0, 0],
+    'normal':              [1, 0, 0],
+    'level_angle':         0,
+    'power':               1,
+    'phase':               0,
+    'power_cutoff':        1e-9 / 100, # (ie: 1e-9 = -90 decibels)
+    'gain':                None,
+    'name':                None, # receiver name
+    'maximum_bounces':     9, # maximum quantity of bounces before quitting the loop
+    'receiver':            False, # bool whether it is a facet or a receiver
+    'verbose':             False, # print every step of every waves travelling
+    'facet_length':        1e-1,
+    'profiler':            False, # print calls and timelapse of some critical methods
+    'cumulative_distance': 0,
+    'cumulative_loss':     1,
 }
 
 user_parameters = {}
@@ -234,9 +236,11 @@ class Wave():
                  'phase',
                  'gain',
                  'wavelength',
+                 'cumulative_distance',
+                 'cumulative_loss',
                 ] # optimization
         
-    def __init__(self, frequency, position, normal, power, phase, gain):
+    def __init__(self, frequency, position, normal, power, phase, gain, cumulative_distance=0, cumulative_loss=1):
         self.frequency = frequency
         self.wavelength = self.frequency / light_speed
         self.position = position
@@ -245,6 +249,8 @@ class Wave():
         self.power = power
         self.phase = phase
         self.gain = gain
+        self.cumulative_distance = cumulative_distance
+        self.cumulative_loss = cumulative_loss
 
         
     def __repr__(self):
@@ -254,6 +260,8 @@ class Wave():
                f" \u03C6:{round(degrees(self.phase))}\u00B0" + \
                f" position:{self.position}" + \
                f" normal:{self.normal}" + \
+               f" distance:{round(self.cumulative_distance,1)}" + \
+               f" loss:{self.cumulative_loss}" + \
                ">"
     
     
@@ -373,6 +381,8 @@ class Simulation():
                 power=kwargs['power'],
                 phase=kwargs['phase'],
                 gain=kwargs['gain'],
+                cumulative_distance=kwargs['cumulative_distance'],
+                cumulative_loss=kwargs['cumulative_loss']
             ))
         
         self.frequencies.add(kwargs['frequency'])
@@ -487,7 +497,7 @@ class Simulation():
         for receiver_name, receiver_waves in self.receivers.items():
             measurement_per_frequency = {frequency: 0+0j for frequency in self.frequencies}
             for wave in receiver_waves:
-                power_complex = wave.power * cis(wave.phase)
+                power_complex = wave.power * wave.cumulative_loss * power_loss(wave.cumulative_distance) * cis(wave.phase + phase_shift(wave.cumulative_distance, wave.wavelength))
                 measurement_per_frequency[wave.frequency] += power_complex
                 
         self.measurements[receiver_name] = measurement_per_frequency
@@ -560,12 +570,12 @@ class Simulation():
 
                 else:
 
-                    if self.profiler: start_time = time.time()
-                    power_incident, phase_incident = wave_incident(wave, facet, geometry['distance'], gain)
-                    if self.profiler: times['incident'][0] += 1
-                    if self.profiler: times['incident'][1] += time.time() - start_time
+#                     if self.profiler: start_time = time.time()
+                        
+#                     if self.profiler: times['incident'][0] += 1
+#                     if self.profiler: times['incident'][1] += time.time() - start_time
 
-                    is_faded_out = power_incident < self.power_cutoff
+                    is_faded_out = False#power_incident < self.power_cutoff
 
                     if is_faded_out:
 
@@ -578,9 +588,11 @@ class Simulation():
                                 frequency=wave.frequency, # assuming no Doppler effect
                                 position=facet.position,
                                 normal=geometry['reflected_unit_2'],
-                                power=power_incident,
-                                phase=phase_incident,
+                                power=wave.power,
+                                phase=wave.phase,
                                 gain=facet.gain,
+                                cumulative_distance=wave.cumulative_distance+geometry['distance'],
+                                cumulative_loss=wave.cumulative_loss*gain*facet.area
                             )
                         if self.profiler: times['new_wave'][0] += 1
                         if self.profiler: times['new_wave'][1] += time.time() - start_time
