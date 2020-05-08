@@ -503,6 +503,11 @@ class Simulation():
 
 
     def plot_receiver(self, receiver_name, axes=None):
+        """Plots the signal from a receiver.
+
+        Args:
+            receiver_name (string): receiver's label.
+        """
         
         if axes is None: fig, axes = plt.subplots(2, 1, sharex=True)
 
@@ -528,7 +533,12 @@ class Simulation():
         _ = plt.suptitle(f'Rvv from {receiver_name}')
         
         
-    def plot_gain(self, gain):        
+    def plot_gain(self, gain):
+        """Plots the radiation pattern.
+
+        Args:
+            gain (lambda): function of angle in radians.
+        """       
         angles = np.arange(-np.pi, np.pi, .001)
         plt.polar(angles, np.array(list(map(gain, angles))))
         plt.title('Radiation Pattern')
