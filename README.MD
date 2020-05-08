@@ -3,23 +3,34 @@
 [![Generic badge](https://img.shields.io/badge/Python-3.6-blue.svg)](https://shields.io/)
 
 ### Example:
+    import numpy as np
+    import matplotlib.pyplot as plt    
+    module_location = '../../repos/polarimetric_simulation/'
+    sys.path.append(module_location)
+    import simulation
+    
     sim = mimo.simulation.Simulation()
     
     receiver_name = 'Receiver 1'
-    transmitter_power = 1
+    frequencies = np.arange(2.1, 2.9, .01)*1e9
+    distances = np.arange(1, 1.3, .1)
+    width, height = .4, 1.6
     
-    gain_antenna = lambda incident_angle: max(0, 1 - abs(incident_angle))
-    gain_receiver = lambda incident_angle: max(0, 1 - abs(incident_angle))
-    gain_facet = lambda incident_angle: max(0, 1 - abs(incident_angle))
+    fig, axs = plt.subplots(2, 1)
+    for distance in distances:
+        sim = simulation.Simulation()
+        sim.add_plate(width=width, height=height, position=[distance, 0, 0], normal=[-1, 0, 0], facet_length=facet_length)
+        
+        sim.add_receiver(name=receiver_name)
+        
+        for frequency in frequencies:
+            sim.add_wave(frequency=frequency, normal=[1, 0, 0])
+            
+        sim.run()
+        sim.plot_receiver(receiver_name, axes=axs)   
     
-    sim.add_facet(position=[10,  0, 0], normal=[-1, 0, 0], gain=gain_facet, area=facet_area)
-    sim.add_facet(position=[ 5, -1, 0], normal=[0, 0, 1], gain=gain_facet, area=facet_area)
-    sim.add_receiver(boresight=[1, 0, 0], gain=gain_receiver, name=receiver_name, area=receiver_area)
-    sim.add_pulse(frequency=frequency, power=transmitter_power, phase=0, boresight=[1, 0, 0], gain=gain_antenna)
-
-    sim.run()
-
-    sim
+    _ = plt.legend(np.round(distances,1), title='distance')
+    plt.suptitle(f'Svv from plate {round(width,1)}m x {round(height,1)}m')
 
 ## Assumptions:
 
