@@ -198,20 +198,20 @@ def power_loss(distance, power=1):
     return power * density_loss
 
 
-def reflect_units(incident_unit, normal=[0, 0, 1], reflected_angle=None):
+def reflect_units(incident_unit, normal=[0, 0, 1], reflected_cos_angle=None):
     """Calculates the reflected vector given the incident and the surface's normal.
     
     Args:
         incident_unit (numpy.array): components of the unit incident vector.
         normal (numpy.array): components of the unit normal vector of the reflecting surface.
-        reflected_angle (Optional float): angle of reflection [radians], for optimization purpose to avoid recalculating the angle (Default None)
+        reflected_cos_angle (Optional float): cossine of the angle of reflection, for optimization (Default None)
         
     Returns:
         (numpy.array): components of the unit reflected vector.
     """
-    if reflected_angle is None: reflected_angle = angle_unit(incident_unit, normal)
-    reflected_unit = incident_unit - 2 * reflected_angle * normal
-    return reflected_unit, reflected_angle
+    if reflected_cos_angle is None: reflected_cos_angle = cossine_units(incident_unit, normal)
+    reflected_unit = incident_unit - 2 * reflected_cos_angle * normal
+    return reflected_unit
 
 
 def wave_incident(wave, facet, distance, gain=1):    
@@ -617,6 +617,8 @@ class Simulation():
                   'displacement': None,
                   'distance': None,
                   'direction': None,
+                  'reflected_cos_1': None,
+                  'reflected_cos_2': None,
                   'reflected_angle_1': None,
                   'reflected_angle_2': None,
                   'reflected_unit_1': None,
@@ -632,24 +634,20 @@ class Simulation():
             
             geometry['direction'] = unit(geometry['displacement'], geometry['distance'])
             
-            cos_angle_1 = cossine_units(facet_1.normal,  geometry['direction'])
-            cos_angle_2 = cossine_units(facet_2.normal, -geometry['direction'])
+            geometry['reflected_cos_1'] = -cossine_units(facet_1.normal,  geometry['direction'])
+            geometry['reflected_cos_2'] = -cossine_units(facet_2.normal, -geometry['direction'])
             
-            is_facing_1 = (cos_angle_1 < 0)
-            is_facing_2 = (cos_angle_2 < 0)
+            is_facing_1 = geometry['reflected_cos_1']
+            is_facing_2 = geometry['reflected_cos_2']
             is_valid = is_facing_1 and is_facing_2
             
             if is_valid:  # BUG: omini antennas should not be discarded
-                incident_angle_1 = cos_to_angle(cos_angle_1)
-                incident_angle_2 = cos_to_angle(cos_angle_1)
-                reflected_angle_1 = abs(incident_angle_1 - np.pi)
-                reflected_angle_2 = abs(incident_angle_2 - np.pi)
+                geometry['reflected_angle_1'] = cos_to_angle(geometry['reflected_cos_1'])
+                geometry['reflected_angle_2'] = cos_to_angle(geometry['reflected_cos_2'])
                 
-                reflected_unit_1, _ = reflect_units(geometry['direction'], facet_1.normal, incident_angle_1)
-                reflected_unit_2, _ = reflect_units(geometry['direction'], facet_2.normal, incident_angle_2)
+                reflected_unit_1 = reflect_units(geometry['direction'], facet_1.normal, geometry['reflected_cos_1'])
+                reflected_unit_2 = reflect_units(geometry['direction'], facet_2.normal, geometry['reflected_cos_2'])
                 
-                geometry['reflected_angle_1'] = reflected_angle_1
-                geometry['reflected_angle_2'] = reflected_angle_2
                 geometry['reflected_unit_1'] = reflected_unit_1
                 geometry['reflected_unit_2'] = reflected_unit_2
                 
@@ -664,6 +662,8 @@ class Simulation():
                   'displacement': geometry['displacement'],
                   'distance': geometry['distance'],
                   'direction': geometry['direction'],
+                  'reflected_cos_1': geometry['reflected_cos_2'],
+                  'reflected_cos_2': geometry['reflected_cos_1'],
                   'reflected_angle_1': geometry['reflected_angle_2'],
                   'reflected_angle_2': geometry['reflected_angle_1'],
                   'reflected_unit_1': geometry['reflected_unit_2'],
