@@ -526,9 +526,6 @@ class Simulation():
         plt.xlabel('Angle [degrees]')
         plt.ylabel('Gain')
         plt.savefig('Radiation_Pattern')
-            
-            
-        self.waves = self.reflections
         
         
     def _run_step(self):
