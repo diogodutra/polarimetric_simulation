@@ -213,16 +213,6 @@ def reflect_units(incident_unit, normal=[0, 0, 1], reflected_cos_angle=None):
     if reflected_cos_angle is None: reflected_cos_angle = cossine_units(incident_unit, normal)
     reflected_unit = incident_unit - 2 * reflected_cos_angle * normal
     return reflected_unit
-
-
-def wave_incident(wave, facet, distance, gain=1):    
-    # electromagnetic calculations
-    power_origin = wave.power * gain
-    phase_incident = phase_shift(distance, wave.wavelength, wave.phase)
-    power_incident = power_loss(distance, power_origin)
-    power_incident *= facet.area # assuming power constant over all the facet surface. Is it really proportional to the facet area?
-    
-    return power_incident, phase_incident
     
 
 class Wave():
@@ -296,7 +286,7 @@ class Simulation():
         Args:
             verbose (Optional bool): prints every wave bounce (default False)
 
-        Usage::        
+        Usage::
         
         >>> receiver_name = 'Receiver 1'
         >>> frequencies = np.arange(2.1, 2.9, .01)*1e9
@@ -550,8 +540,7 @@ class Simulation():
     def _run_step(self):
         """Runs one bounce for every current wave in the simulation."""
         
-        if self.profiler:
-            times = defaultdict(lambda: [0, 0])
+        if self.profiler: times = defaultdict(lambda: [0, 0])
         
         self.reflections = []
         
