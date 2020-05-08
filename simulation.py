@@ -526,6 +526,9 @@ class Simulation():
         plt.xlabel('Angle [degrees]')
         plt.ylabel('Gain')
         plt.savefig('Radiation_Pattern')
+            
+            
+        self.waves = self.reflections
         
         
     def _run_step(self):
@@ -539,64 +542,65 @@ class Simulation():
         paths_for_this_step = self._list_paths_for_this_step()
             
         for wave, facets in paths_for_this_step:
-            for facet in facets:
+            for (facet, key) in facets:
             
-                if self.profiler: start_time = time.time()
-                key = (wave.position_tuple, facet.position_tuple)
-                if self.profiler: times['key     '][0] += 1                    
-                if self.profiler: times['key     '][1] += time.time() - start_time
+#                 if self.profiler: start_time = time.time()
+#                 key = (wave.position_tuple, facet.position_tuple)
+#                 if self.profiler: times['key     '][0] += 1                    
+#                 if self.profiler: times['key     '][1] += time.time() - start_time
                     
                 if self.profiler: start_time = time.time()
                 geometry = self.geometries[key]
                 if self.profiler: times['geometry'][0] += 1
                 if self.profiler: times['geometry'][1] += time.time() - start_time
 
-                if geometry['valid']:
+                if self.verbose: print_text = f'Wave freq:{wave.frequency} @ {wave.position} dbW:{round(decibels(wave.power))} ' + \
+                    f'\u03C6:{round(degrees(wave.phase))}\u00B0 going to {facet.position}'
 
-                    if self.verbose: print_text = f'Wave freq:{wave.frequency} @ {wave.position} dbW:{round(decibels(wave.power))} ' + \
-                        f'\u03C6:{round(degrees(wave.phase))}\u00B0 going to {facet.position}'
+                if self.profiler: start_time = time.time()
+                gain = wave.gain(geometry['reflected_angle_1']) # assuming azimuth==elevation in radiation pattern
+                if self.profiler: times['gain    '][0] += 1
+                if self.profiler: times['gain    '][1] += time.time() - start_time
 
-                    gain = wave.gain(geometry['reflected_angle_1']) # assuming azimuth==elevation in radiation pattern
+                if gain <= 0:
 
-                    if gain <= 0:
+                    if self.verbose: print_text += ' but gone because gain is zero.'
 
-                        if self.verbose: print_text += ' but gone because gain is zero.'
+                else:
+
+                    if self.profiler: start_time = time.time()
+                    power_incident, phase_incident = wave_incident(wave, facet, geometry['distance'], gain)
+                    if self.profiler: times['incident'][0] += 1
+                    if self.profiler: times['incident'][1] += time.time() - start_time
+
+                    is_faded_out = power_incident < self.power_cutoff
+
+                    if is_faded_out:
+
+                        if self.verbose: print_text += f' but gone because faded out with P={round(decibels(power_incident))}dbW.'
 
                     else:
 
                         if self.profiler: start_time = time.time()
-                        power_incident, phase_incident = wave_incident(wave, facet, geometry['distance'], gain)
-                        if self.profiler: times['incident'][0] += 1
-                        if self.profiler: times['incident'][1] += time.time() - start_time
+                        new_wave = Wave(
+                                frequency=wave.frequency, # assuming no Doppler effect
+                                position=facet.position,
+                                normal=geometry['reflected_unit_2'],
+                                power=power_incident,
+                                phase=phase_incident,
+                                gain=facet.gain,
+                            )
+                        if self.profiler: times['new_wave'][0] += 1
+                        if self.profiler: times['new_wave'][1] += time.time() - start_time
 
-                        is_faded_out = power_incident < self.power_cutoff
-
-                        if is_faded_out:
-
-                            if self.verbose: print_text += f' but gone because faded out with P={round(decibels(power_incident))}dbW.'
-
-                        else:
-
-                            if self.profiler: start_time = time.time()
-                            new_wave = Wave(
-                                    frequency=wave.frequency, # assuming no Doppler effect
-                                    position=facet.position,
-                                    normal=geometry['reflected_unit_2'],
-                                    power=power_incident,
-                                    phase=phase_incident,
-                                    gain=facet.gain,
-                                )
-                            if self.profiler: times['new_wave'][0] += 1
-                            if self.profiler: times['new_wave'][1] += time.time() - start_time
-
-                            if self.profiler: start_time = time.time()
-                            self._append_reflected_wave(new_wave, facet)
-                            if self.profiler: times['append  '][0] += 1
-                            if self.profiler: times['append  '][1] += time.time() - start_time
+                        if self.profiler: start_time = time.time()
+                        self._append_reflected_wave(new_wave, facet)
+                        if self.profiler: times['append  '][0] += 1
+                        if self.profiler: times['append  '][1] += time.time() - start_time
 
 
-                    if self.verbose: print(print_text)
-                     
+                if self.verbose: print(print_text)
+                  
         self.waves = self.reflections
         
         if self.profiler:
@@ -691,8 +695,8 @@ class Simulation():
                 
                 # add this to the list of valid paths
                 if geometry['valid']:
-                    self.valid_paths[facet_1.position_tuple].append(facet_2)
-                    self.valid_paths[facet_2.position_tuple].append(facet_1)
+                    self.valid_paths[facet_1.position_tuple].append((facet_2, key))
+                    self.valid_paths[facet_2.position_tuple].append((facet_1, inverted_key))
             
             
     def _preprocess(self):
